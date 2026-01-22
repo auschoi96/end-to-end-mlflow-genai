@@ -1,3 +1,5 @@
+Original Author: [Wesley Pasfield](https://github.com/WesleyPasfield)
+
 # DC Assistant: NFL Defensive Coordinator AI Agent
 
 An MLflow-powered AI agent that helps NFL defensive coordinators prepare game plans by analyzing offensive tendencies, formations, and play distributions.

@@ -33,9 +33,10 @@ const introContent = `
 
 LLM judges are AI-powered quality assessment tools that scale human expertise to evaluate GenAI quality automatically - in development and production. They assess semantic correctness, style, safety, and relative quality - answering questions like "Does this answer correctly?" and "Is this appropriate for our brand?"
 
-MLflow has 2 flavors of judges:
+With **MLflow 3.8**, you can now leverage multiple judge types:
 - **Built-in Judges** - Research-backed judges for safety, hallucination, retrieval quality, and relevance
 - **Custom Judges** - Tune our research-backed LLM judges to your business needs and human expert judgment
+- **Third-Party Judges** - Integrate popular evaluation frameworks like DeepEval and RAGAS
 
 MLflow also supports *custom code-based metrics*, so if the built-in judges don't fit your use case, you can write your own.
 
@@ -46,17 +47,23 @@ The same judges can be used to both evaluate quality in development and monitor 
 
 const builtinJudgesCode = `import mlflow
 import mlflow.genai
-from mlflow.genai.scorers import Guidelines, RelevanceToQuery, Safety
-from mlflow_demo.agent.email_generator import EmailGenerator
+from mlflow.genai.scorers import (
+    RelevanceToQuery,
+    Safety,
+    ConversationalSafety,
+    ConversationToolCallEfficiency
+)
 from datetime import datetime
 
 # Create instances of applicable built-in judges
 builtin_scorers = [
     RelevanceToQuery(),
     Safety(),
+    ConversationalSafety(),
+    ConversationToolCallEfficiency(),
 ]
 
-print("✅ Created built-in scorers for our use case:")
+print("✅ Created built-in scorers for DC Assistant:")
 for scorer in builtin_scorers:
     print(f"   - {scorer.__class__.__name__}")
 
@@ -68,16 +75,21 @@ traces = mlflow.search_traces(
 )
 
 # Define prediction function for evaluation
-def predict_fn(customer_data: dict):
-    """Generate email for evaluation - uses current production prompt"""
-    generator = EmailGenerator()
-    customer_name = customer_data["account"]["name"]
-    user_input = customer_data.get("user_input")
-    return generator.generate_email_with_retrieval(customer_name, user_input)
+def predict_fn(question_data: dict):
+    """Generate DC analysis for evaluation - uses current production prompt"""
+    from databricks.agents import ResponsesAgent
+
+    # Agent is already deployed as Model Serving endpoint
+    # This would call the endpoint to generate analysis
+    question = question_data.get("question")
+    response = agent.predict({
+        "input": [{"role": "user", "content": question}]
+    })
+    return response
 
 # Run the evaluation
 with mlflow.start_run(
-    run_name=f'{datetime.now().strftime("%Y%m%d_%H%M%S")}_quality_metrics_demo'
+    run_name=f'{datetime.now().strftime("%Y%m%d_%H%M%S")}_dc_quality_metrics'
 ) as run:
     results = mlflow.genai.evaluate(
         data=traces,
@@ -91,48 +103,31 @@ print(f"✅ Evaluation completed! Run ID: {run_id}")`;
 const customJudgesCode = `import mlflow
 from mlflow.genai.scorers import Guidelines
 
-# Define custom guidelines for email quality
+# Define custom guidelines for DC Assistant quality
 custom_guidelines = [
     {
-        "name": "accuracy",
-        "guideline": """The response correctly references all factual information from the provided_info based on these rules:
-- All factual information must be directly sourced from the provided data with NO fabrication
-- Names, dates, numbers, and company details must be 100% accurate with no errors
-- Meeting discussions must be summarized with the exact same sentiment and priority as presented in the data
-- Support ticket information must include correct ticket IDs, status, and resolution details when available
-- All product usage statistics must be presented with the same metrics provided in the data
-- No references to CloudFlow features, services, or offerings unless specifically mentioned in the customer data
-- AUTOMATIC FAIL if any information is mentioned that is not explicitly provided in the data"""
+        "name": "Football Language",
+        "guideline": """The response uses appropriate NFL terminology and coaching language based on these rules:
+- Uses correct football terminology (formations, personnel packages, schemes)
+- References specific plays, situations, and tendencies using standard NFL nomenclature
+- Avoids overly technical jargon that wouldn't be used by coaching staff
+- Uses down-and-distance notation correctly (e.g., "3rd and 6", "2nd and long")
+- Personnel packages referenced correctly (11 = 1 RB, 1 TE, 3 WR; 12 = 1 RB, 2 TE, 2 WR, etc.)
+- Formation names align with standard NFL terminology (I-formation, shotgun, pistol, etc.)
+- Coverage and blitz schemes use standard coaching terminology (Cover 2, Cover 3, A-gap pressure, etc.)
+- AUTOMATIC FAIL if incorrect terminology is used or if language suggests lack of football knowledge"""
     },
     {
-        "name": "personalized",
-        "guideline": """The response demonstrates clear personalization based on the provided_info based on these rules:
-- Email must begin by referencing the most recent meeting/interaction
-- Immediately next, the email must address the customer's MOST pressing concern as evidenced in the data
-- Content structure must be customized based on the account's health status (critical issues first for "Fair" or "Poor" accounts)
-- Industry-specific language must be used that reflects the customer's sector
-- Recommendations must ONLY reference features that are:
-  a) Listed as "least_used_features" in the data, AND
-  b) Directly related to the "potential_opportunity" field
-- Relationship history must be acknowledged (new vs. mature relationship)
-- Deal stage must influence communication approach (implementation vs. renewal vs. growth)
-- AUTOMATIC FAIL if recommendations could be copied to another customer in a different situation"""
-    },
-    {
-        "name": "relevance",
-        "guideline": """The response prioritizes content that matters to the recipient in the provided_info based on these rules:
-- Critical support tickets (status="Open (Critical)") must be addressed after the greeting, reference to the most recent interaction, any pleasantries, and references to closed tickets
-- Time-sensitive action items must be addressed before general updates
-- Content must be ordered by descending urgency as defined by:
-  1. Critical support issues
-  2. Action items explicitly stated in most recent meeting
-  3. Upcoming renewal if within 30 days
-  4. Recently resolved issues
-  5. Usage trends and recommendations
-- No more than ONE feature recommendation for accounts with open critical issues
-- No mentions of company news, product releases, or success stories not directly requested by the customer
-- No calls to action unrelated to the immediate needs in the data
-- AUTOMATIC FAIL if the email requests a meeting without being tied to a specific action item or opportunity in the data"""
+        "name": "Football Analysis",
+        "guideline": """The response provides actionable defensive coordinator recommendations based on these rules:
+- Analysis must be grounded in the actual play-by-play data queried from Unity Catalog tools
+- Tendencies must include specific percentages or frequency metrics when available
+- Recommendations must be strategically sound for game planning (not generic advice)
+- Must address the specific situation asked about (down-and-distance, red zone, personnel, etc.)
+- Include key matchups or player-specific insights when relevant to the query
+- Provide clear defensive adjustments or counter-strategies
+- Must avoid hallucinating data not present in the tool call results
+- AUTOMATIC FAIL if recommendations are generic, not data-driven, or strategically unsound"""
     }
 ]
 
@@ -317,11 +312,21 @@ export function EvaluationBuilder() {
     {
       name: "RelevanceToQuery",
       description: "Does the response directly address the user's input?",
-      enabled: false,
+      enabled: true,
     },
     {
       name: "Safety",
       description: "Does the response avoid harmful or toxic content?",
+      enabled: true,
+    },
+    {
+      name: "ConversationalSafety",
+      description: "Does the conversation maintain safe and appropriate tone throughout?",
+      enabled: true,
+    },
+    {
+      name: "ConversationToolCallEfficiency",
+      description: "Are tool calls used efficiently without redundancy?",
       enabled: true,
     },
     {
@@ -361,49 +366,30 @@ export function EvaluationBuilder() {
 
   const [guidelines, setGuidelines] = React.useState([
     {
-      id: "accuracy",
-      name: "accuracy",
-      content: `The response correctly references all factual information from the provided_info based on these rules:
-- All factual information must be directly sourced from the provided data with NO fabrication
-- Names, dates, numbers, and company details must be 100% accurate with no errors
-- Meeting discussions must be summarized with the exact same sentiment and priority as presented in the data
-- Support ticket information must include correct ticket IDs, status, and resolution details when available
-- All product usage statistics must be presented with the same metrics provided in the data
-- No references to CloudFlow features, services, or offerings unless specifically mentioned in the customer data
-- AUTOMATIC FAIL if any information is mentioned that is not explicitly provided in the data`,
+      id: "football-language",
+      name: "Football Language",
+      content: `The response uses appropriate NFL terminology and coaching language based on these rules:
+- Uses correct football terminology (formations, personnel packages, schemes)
+- References specific plays, situations, and tendencies using standard NFL nomenclature
+- Avoids overly technical jargon that wouldn't be used by coaching staff
+- Uses down-and-distance notation correctly (e.g., "3rd and 6", "2nd and long")
+- Personnel packages referenced correctly (11 = 1 RB, 1 TE, 3 WR; 12 = 1 RB, 2 TE, 2 WR, etc.)
+- Formation names align with standard NFL terminology (I-formation, shotgun, pistol, etc.)
+- Coverage and blitz schemes use standard coaching terminology (Cover 2, Cover 3, A-gap pressure, etc.)
+- AUTOMATIC FAIL if incorrect terminology is used or if language suggests lack of football knowledge`,
     },
     {
-      id: "personalized",
-      name: "personalized",
-      content: `The response demonstrates clear personalization based on the provided_info based on these rules:
-- Email must begin by referencing the most recent meeting/interaction
-- Immediatly next, the email must address the customer's MOST pressing concern as evidenced in the data
-- Content structure must be customized based on the account's health status (critical issues first for "Fair" or "Poor" accounts)
-- Industry-specific language must be used that reflects the customer's sector
-- Recommendations must ONLY reference features that are:
-  a) Listed as "least_used_features" in the data, AND
-  b) Directly related to the "potential_opportunity" field
-- Relationship history must be acknowledged (new vs. mature relationship)
-- Deal stage must influence communication approach (implementation vs. renewal vs. growth)
-- AUTOMATIC FAIL if recommendations could be copied to another customer in a different situation`,
-    },
-    {
-      id: "relevance",
-      name: "relevance",
-      content: `The response prioritizes content that matters to the recipient in the provided_info based on these rules:
-- Critical support tickets (status="Open (Critical)") must be addressed after the greeting, reference to the most recent interaction, any pleasantrys, and references to closed tickets
-    - it is ok if they name is slightly different as long as it is clearly the same issue as in the provided_info
-- Time-sensitive action items must be addressed before general updates
-- Content must be ordered by descending urgency as defined by:
-  1. Critical support issues
-  2. Action items explicitly stated in most recent meeting
-  3. Upcoming renewal if within 30 days
-  4. Recently resolved issues
-  5. Usage trends and recommendations
-- No more than ONE feature recommendation for accounts with open critical issues
-- No mentions of company news, product releases, or success stories not directly requested by the customer
-- No calls to action unrelated to the immediate needs in the data
-- AUTOMATIC FAIL if the email requests a meeting without being tied to a specific action item or opportunity in the data`,
+      id: "football-analysis",
+      name: "Football Analysis",
+      content: `The response provides actionable defensive coordinator recommendations based on these rules:
+- Analysis must be grounded in the actual play-by-play data queried from Unity Catalog tools
+- Tendencies must include specific percentages or frequency metrics when available
+- Recommendations must be strategically sound for game planning (not generic advice)
+- Must address the specific situation asked about (down-and-distance, red zone, personnel, etc.)
+- Include key matchups or player-specific insights when relevant to the query
+- Provide clear defensive adjustments or counter-strategies
+- Must avoid hallucinating data not present in the tool call results
+- AUTOMATIC FAIL if recommendations are generic, not data-driven, or strategically unsound`,
     },
   ]);
 
@@ -506,7 +492,7 @@ export function EvaluationBuilder() {
 
   const demoSection = (
     <div className="space-y-6">
-      <MarkdownContent content="Below is an example configuration showing how to set up LLM judges for email quality evaluation. We've configured the Safety judge and three custom guidelines that were used to evaluate recent production traces." />
+      <MarkdownContent content="Below is an example configuration showing how to set up LLM judges for DC Assistant analysis quality. We've configured built-in judges (RelevanceToQuery, Safety, ConversationalSafety, ConversationToolCallEfficiency) and two custom football-domain judges (Football Language and Football Analysis) that evaluate recent production traces." />
 
       <div className="space-y-4">
         <Card>
@@ -582,14 +568,13 @@ export function EvaluationBuilder() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Award className="h-5 w-5" />
-              Guidelines allow you to customize Databricks' built-in judges to
-              your use case.
+              Curate your domain specific judge here
             </CardTitle>
             <br />
             Guidelines have the distinct advantage of being easy to explain to
             business stakeholders ("we are evaluating if the app delivers upon
             this set of rules") and, as such, can often be directly written by
-            domain experts.
+            domain experts like coaching staff.
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-4">
@@ -643,6 +628,43 @@ export function EvaluationBuilder() {
           </CardContent>
         </Card>
 
+        {/* Third-Party Judges */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5" />
+              Third-Party Judge Integration (MLflow 3.8+)
+            </CardTitle>
+            <br />
+            MLflow 3.8 introduces support for popular evaluation frameworks, allowing you to leverage specialized judges from DeepEval and RAGAS alongside MLflow's built-in judges.
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="border rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Badge variant="outline">DeepEval</Badge>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Integrate DeepEval judges for advanced RAG evaluation, hallucination detection, and contextual relevance assessment.
+                </p>
+              </div>
+              <div className="border rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Badge variant="outline">RAGAS</Badge>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Use RAGAS judges for retrieval-augmented generation metrics including faithfulness, answer relevance, and context precision.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 p-3 bg-muted/30 rounded-lg">
+              <p className="text-xs text-muted-foreground">
+                <strong>Coming soon:</strong> Example configurations for DeepEval and RAGAS judges tailored to DC Assistant evaluation.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
         <div className="space-y-4 mb-4">
           <div className="flex gap-4">
             <Button
@@ -659,14 +681,46 @@ export function EvaluationBuilder() {
             </Button>
           </div>
         </div>
+
+        {/* Judge Validation Callout */}
+        <Card className="border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-amber-900 dark:text-amber-100">
+              <Award className="h-5 w-5" />
+              Great! We've created baseline judges - but we're not done yet
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm text-amber-900/90 dark:text-amber-100/90">
+            <p>
+              <strong>LLM judges rarely align perfectly with domain experts on the first iteration.</strong> This happens because:
+            </p>
+            <ul className="list-disc pl-6 space-y-2">
+              <li>
+                <strong>Implicit expertise:</strong> SMEs have nuanced, context-specific knowledge that's difficult to capture in initial guidelines
+              </li>
+              <li>
+                <strong>Terminology gaps:</strong> Domain-specific language and standards may not be consistently applied without real examples
+              </li>
+              <li>
+                <strong>Edge cases:</strong> Guidelines often miss corner cases that experts intuitively handle but haven't explicitly documented
+              </li>
+              <li>
+                <strong>Calibration issues:</strong> Judges may be systematically too strict or too lenient compared to human judgment
+              </li>
+            </ul>
+            <p className="pt-2 font-medium">
+              <strong>Next step:</strong> We'll collect feedback from SMEs (coaching staff) on how these judges performed. This human validation will help us identify misalignments and refine our evaluation criteria to match expert judgment.
+            </p>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
 
   return (
     <StepLayout
-      title="Evaluate quality using LLM judges"
-      description="Scale your human expertise with LLM judges for automated quality evaluation that is tuned to your use case"
+      title="Evaluate DC recommendations using LLM judges"
+      description="Scale coaching expertise with LLM judges for automated quality evaluation of defensive game analysis"
       intro={introSection}
       codeSection={codeSection}
       demoSection={demoSection}

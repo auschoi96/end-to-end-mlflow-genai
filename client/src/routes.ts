@@ -1,6 +1,7 @@
 export type ViewType =
   | "chat"
   | "email"
+  | "dc-assistant"
   | "demo-overview"
   | "step1-tracing"
   | "step2-evaluation"
@@ -14,6 +15,7 @@ export const routes: Record<ViewType, string> = {
   "demo-overview": "/",
   chat: "/chat",
   email: "/email",
+  "dc-assistant": "/dc-assistant",
   "step1-tracing": "/tracing",
   "step2-evaluation": "/evaluation",
   "step3-improvement": "/improvement",

@@ -188,3 +188,79 @@ async def submit_feedback(feedback: FeedbackRequest):
     user_name=feedback.sales_rep_name,
   )
   return FeedbackResponse(success=result['success'], message=result['message'])
+
+
+# DC Assistant endpoints
+class DcAnalysisRequest(BaseModel):
+  """Request for DC Assistant analysis."""
+
+  question: str
+
+
+import mlflow
+from databricks.sdk import WorkspaceClient
+from mlflow_demo.utils.mlflow_helpers import get_mlflow_experiment_id
+
+
+@router.post('/dc-assistant/analyze-stream')
+async def api_dc_assistant_analyze_stream(request_data: DcAnalysisRequest):
+  """Stream DC Assistant analysis generation."""
+
+  async def generate():
+    try:
+      # Set MLflow experiment for tracing
+      mlflow.set_experiment(experiment_id=get_mlflow_experiment_id())
+
+      # Get Workspace Client
+      w = WorkspaceClient()
+
+      # DC Assistant endpoint name
+      dc_endpoint = 'agents_ac_demo-dc_assistant-ac_dc_assistant'
+
+      # Prepare request in Databricks Agent format
+      request_payload = {'input': [{'role': 'user', 'content': request_data.question}]}
+
+      # Stream response from DC Assistant using Databricks Agent API
+      with mlflow.start_span(name='dc_assistant_analysis') as span:
+        span.set_inputs({'question': request_data.question})
+
+        # Call the serving endpoint with streaming
+        response = w.serving_endpoints.query(name=dc_endpoint, inputs=request_payload, stream=True)
+
+        full_response = ''
+
+        # Stream tokens in real-time
+        for chunk in response:
+          if hasattr(chunk, 'choices') and chunk.choices:
+            delta = chunk.choices[0].delta
+            if hasattr(delta, 'content') and delta.content:
+              token = delta.content
+              full_response += token
+              yield f'data: {json.dumps({"type": "token", "content": token})}\n\n'
+
+        # Update span with outputs
+        span.set_outputs({'response': full_response})
+
+        # Get trace ID
+        trace_id = mlflow.get_current_active_trace().info.request_id
+
+        # Send done event with trace ID
+        yield f'data: {json.dumps({"type": "done", "trace_id": trace_id})}\n\n'
+
+    except Exception as e:
+      yield f'data: {json.dumps({"type": "error", "error": str(e)})}\n\n'
+    finally:
+      # Send final done event
+      yield f'data: {json.dumps({"type": "done"})}\n\n'
+
+  return StreamingResponse(
+    generate(),
+    media_type='text/event-stream',
+    headers={
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',  # Disable Nginx buffering
+    },
+  )
+
+

@@ -3,74 +3,81 @@ import { StepLayout } from "@/components/step-layout";
 import { CodeSnippet } from "@/components/code-snippet";
 import { CollapsibleSection } from "@/components/collapsible-section";
 import { MarkdownContent } from "@/components/markdown-content";
-import { EmailGenerator } from "@/components/email-generator/EmailGenerator";
+import { DcTracingDemo } from "@/components/dc-assistant/DcTracingDemo";
 import { Button } from "@/components/ui/button";
 import { ExternalLink } from "lucide-react";
 import { useQueryPreloadedResults } from "@/queries/useQueryPreloadedResults";
 import { NotebookReference } from "@/components/notebook-reference";
 
 const introContent = `
-# MLflow Tracing for GenAI Applications
+# MLflow Tracing: Foundation for Agent Observability
 
-MLflow Tracing provides comprehensive observability for your GenAI applications, allowing you to:
+**MLflow Tracing is one of the core constructs of MLflow 3.0+**, providing complete observability into GenAI agent behavior. Every agent interaction—tool calls, LLM invocations, data queries—is automatically captured as a structured trace, giving you the foundation for debugging, evaluation, and continuous improvement.
 
-- **Debug** issues by inspecting inputs, outputs, and intermediate steps
-- **Collect** user feedback to improve your models
-- **Optimize** latency by identifying bottlenecks
+**Why Tracing Matters for Quality Agents:**
+- **Debugging**: See exactly which tools fired, what parameters were used, and where failures occurred
+- **Evaluation**: Link quality metrics and expert feedback directly to specific agent behaviors
+- **Optimization**: Identify bottlenecks, inefficient tool usage, and opportunities for improvement
+- **Accountability**: Maintain complete audit trail of agent decisions and data sources
 
-Implementing MLflow Tracing only requires *a single line of code*.  You can attach end user feedback from your UI to the corresponding trace so you can quickly debug user-reported issues.
+When a coach asks "What do the Cowboys do on 3rd and 6?", the DC Assistant makes multiple decisions: which Unity Catalog functions to call, what parameters to use, how to interpret the results. **MLflow Tracing automatically captures all of this**, creating a detailed execution graph that serves as the input for evaluation and feedback collection.
 
-![tracing-demo](https://i.imgur.com/tNYUHdC.gif)
+## Trace Structure
+
+Each trace includes:
+- **RETRIEVER spans**: Unity Catalog tool calls with exact SQL parameters and query results
+- **PARSER spans**: Data processing, aggregation, and formatting steps
+- **LLM spans**: Model calls for reasoning, interpretation, and synthesis
+- **Trace ID**: Unique identifier linking coaching feedback to specific analyses
+- **Timestamps**: Latency tracking for each operation to identify performance bottlenecks
+
+**Without tracing, you're flying blind.** Tracing is the prerequisite for everything that follows: evaluation, labeling, judge alignment, and prompt optimization.
 `;
 
 const simpleTracingCode = `
   import mlflow
-  import json
-  from typing import Dict, Any
-  from openai import OpenAI
+  from databricks.agents import ResponsesAgent
+  from databricks.agents.toolkits import UCFunctionToolkit
 
-+ # 🔍 TRACING: Enable automatic tracing of OpenAI SDK calls
-+ mlflow.openai.autolog()  # [AUTO-TRACE] Traces all OpenAI calls
++ # 🔍 TRACING: Enable tracing for the agent
++ mlflow.set_experiment(experiment_id=MLFLOW_EXPERIMENT_ID)
 
-  # Import our EmailGenerator class which uses MLflow Tracing
-  from mlflow_demo.agent.email_generator import EmailGenerator
+  # Load Unity Catalog tools (SQL functions)
+  tools = UCFunctionToolkit(
+      catalog=UC_CATALOG,
+      schema=UC_SCHEMA,
+      function_names=[
+          "who_got_ball_by_down_distance",
+          "success_by_pass_rush_and_coverage",
+          "tendencies_by_personnel",
+          "screen_play_tendencies",
+          # ... more tools
+      ]
+  )
 
-  # Initialize the EmailGenerator with environment configuration
-  email_generator = EmailGenerator()
+  # Create the agent with automatic tracing
++ # 🔍 TRACING: ResponsesAgent automatically traces all interactions
+  agent = ResponsesAgent(
+      tools=tools.get_tools(),
+      system_prompt=system_prompt,
+      model=LLM_MODEL,
+  )
 
-  # The EmailGenerator class uses @mlflow.trace decorator
-  # Here's a simplified version showing the key tracing implementation:
-+ # 🔍 TRACING: Add decorator to trace your function
-+ @mlflow.trace  # [MANUAL-TRACE] Captures inputs, outputs, and timing
-  def generate_email(customer_data: dict) -> Dict[str, Any]:
-      """Generate email with MLflow tracing enabled."""
-      # Set application version for tracking
-      set_app_version()
+  # Example: Coach asks about 3rd down tendencies
+  question = "What do the Cowboys do on 3rd and 6?"
 
-      # Create messages for the LLM
-      messages = _create_messages(customer_data)
++ # 🔍 TRACING: Agent.predict() creates a trace automatically
+  response = agent.predict({"input": [{"role": "user", "content": question}]})
 
-      # Call OpenAI (automatically traced by mlflow.openai.autolog())
-      response = openai_client.chat.completions.create(
-          model=LLM_MODEL,
-          messages=messages,
-      )
++ # 🔍 TRACING: Get the trace ID from the active trace
++ trace_id = mlflow.get_current_active_trace().info.request_id
 
-      # Process the response
-      response_content = response.choices[0].message.content
-      clean_string = _clean_json_response(response_content)
-      email_json = json.loads(clean_string)
+  print(f"Analysis complete. Trace ID: {trace_id}")
 
-+     # 🔍 TRACING: Get trace ID to link feedback
-+     email_json['trace_id'] = _get_current_trace_id()  # [TRACE-ID]
-
-      return email_json
-
-  # Usage example - Now uses customer name and user input instead of full customer data
-  customer_name = sample_customer["account"]["name"]
-  user_input = sample_customer.get("user_input")
-  result = email_generator.generate_email_with_retrieval(customer_name, user_input)
-  print(f'Email generated with trace_id: {result.get("trace_id")}')`;
+  # The trace captures:
+  # - RETRIEVER: Tool call to who_got_ball_by_down_distance("Cowboys", [2024], 3, "medium")
+  # - PARSER: Data formatting and aggregation
+  # - LLM: Final synthesis and recommendations`;
 
 const userFeedbackCode = `\`\`\`diff
   import mlflow
@@ -351,11 +358,11 @@ The diff below shows how to add advanced tracing features:`}
 
         <div className="ml-11 space-y-4">
           <p className="text-muted-foreground">
-            Generate your own email and provide feedback. Then view the
-            resulting MLflow trace with your feedback attached.
+            Configure a question about opponent tendencies and watch the agent call Unity Catalog tools.
+            See which functions are invoked and how the data flows through the trace.
           </p>
 
-          <EmailGenerator />
+          <DcTracingDemo />
         </div>
       </div>
     </div>
@@ -363,8 +370,8 @@ The diff below shows how to add advanced tracing features:`}
 
   return (
     <StepLayout
-      title="Observability with Tracing"
-      description="Implement MLflow Tracing for observability and debugging"
+      title="Observe DC Analysis with Tracing"
+      description="See how MLflow captures tool calls, data queries, and agent reasoning"
       intro={introSection}
       codeSection={codeSection}
       demoSection={demoSection}

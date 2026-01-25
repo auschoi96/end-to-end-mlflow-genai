@@ -41,11 +41,12 @@ import { Spinner } from "@/components/Spinner";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { EmailGenerator } from "@/components/email-generator/EmailGenerator";
+import { DcAssistant } from "@/components/dc-assistant/DcAssistant";
 import { DemoOverview } from "@/components/demo-overview";
 import { TracingDemo } from "@/components/demo-pages/observe-with-tracing";
 import { EvaluationBuilder } from "@/components/demo-pages/create-quality-metrics";
 import { PromptTesting } from "@/components/demo-pages/find-fix-quality-issues";
-import { BusinessMetrics } from "@/components/demo-pages/business-metrics";
+import { JudgeAlignment } from "@/components/demo-pages/business-metrics";
 import { MonitoringDemo } from "@/components/demo-pages/prod-monitoring";
 import { HumanReview } from "@/components/demo-pages/human-review";
 import { PromptRegistry } from "@/components/prompt-registry";
@@ -131,6 +132,14 @@ export function Chat() {
               }
             />
             <Route
+              path="/dc-assistant"
+              element={
+                <div className="w-full h-full">
+                  <DcAssistant />
+                </div>
+              }
+            />
+            <Route
               path="/"
               element={
                 <div className="w-full h-full">
@@ -166,7 +175,7 @@ export function Chat() {
               path="/kpis"
               element={
                 <div className="w-full h-full">
-                  <BusinessMetrics />
+                  <JudgeAlignment />
                 </div>
               }
             />

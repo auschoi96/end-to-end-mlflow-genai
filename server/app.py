@@ -131,15 +131,40 @@ async def experiment():
 async def get_preloaded_results() -> PreloadedResults:
   """Get preloaded evaluation results from setup scripts."""
   databricks_host = ensure_https_protocol(os.getenv('DATABRICKS_HOST'))
+  experiment_id = get_mlflow_experiment_id()
+
+  # Build trace URL with optional workspace and SQL warehouse parameters
+  def build_trace_url(trace_id: str | None) -> str:
+    """Build trace URL with all query parameters."""
+    if not trace_id:
+      return ''
+
+    base_url = f'{databricks_host}/ml/experiments/{experiment_id}/traces'
+    params = []
+
+    workspace_id = os.getenv('DATABRICKS_WORKSPACE_ID')
+    sql_warehouse_id = os.getenv('SQL_WAREHOUSE_ID')
+
+    if workspace_id:
+      params.append(f'o={workspace_id}')
+    if sql_warehouse_id:
+      params.append(f'sqlWarehouseId={sql_warehouse_id}')
+    params.append(f'selectedEvaluationId={trace_id}')
+
+    return f'{base_url}?{"&".join(params)}'
+
+  sample_trace_id = os.getenv('SAMPLE_TRACE_ID')
+  sample_labeling_trace_id = os.getenv('SAMPLE_LABELING_TRACE_ID')
+
   return PreloadedResults(
     low_accuracy_results_url=os.getenv('LOW_ACCURACY_RESULTS_URL'),
     regression_results_url=os.getenv('REGRESSION_RESULTS_URL'),
-    metrics_result_url=f'{databricks_host}/ml/experiments/{get_mlflow_experiment_id()}/traces?selectedEvaluationId={os.getenv("SAMPLE_TRACE_ID")}',
-    sample_trace_url=f'{databricks_host}/ml/experiments/{get_mlflow_experiment_id()}/traces?selectedEvaluationId={os.getenv("SAMPLE_TRACE_ID")}',
-    sample_labeling_session_url=f'{databricks_host}/ml/experiments/{get_mlflow_experiment_id()}/labeling-sessions?selectedLabelingSessionId={os.getenv("SAMPLE_LABELING_SESSION_ID")}',
-    sample_review_app_url=os.getenv('SAMPLE_REVIEW_APP_URL'),
-    sample_labeling_trace_id=os.getenv('SAMPLE_LABELING_TRACE_ID'),
-    sample_labeling_trace_url=f'{databricks_host}/ml/experiments/{get_mlflow_experiment_id()}/traces?selectedEvaluationId={os.getenv("SAMPLE_LABELING_TRACE_ID")}',
+    metrics_result_url=build_trace_url(sample_trace_id),
+    sample_trace_url=build_trace_url(sample_trace_id),
+    sample_labeling_session_url=f'{databricks_host}/ml/experiments/{experiment_id}/labeling-sessions?selectedLabelingSessionId={os.getenv("SAMPLE_LABELING_SESSION_ID")}',
+    sample_review_app_url=os.getenv('SAMPLE_REVIEW_APP_URL') or '',
+    sample_labeling_trace_id=sample_labeling_trace_id,
+    sample_labeling_trace_url=build_trace_url(sample_labeling_trace_id),
   )
 
 

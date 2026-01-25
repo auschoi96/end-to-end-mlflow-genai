@@ -19,6 +19,7 @@ import {
   ExternalLink,
   BookOpen,
   Globe,
+  Trophy,
 } from "lucide-react";
 
 import { NavMain } from "@/components/nav-main";
@@ -50,9 +51,9 @@ const data = {
     // },
 
     {
-      title: "Sales email generator",
-      value: "email",
-      icon: Mail,
+      title: "DC Assistant",
+      value: "dc-assistant",
+      icon: Trophy,
     },
   ],
   mlflowSteps: [
@@ -60,47 +61,46 @@ const data = {
       title: "Demo Overview",
       value: "demo-overview",
       icon: PlayCircle,
-      description: "Introduction",
+      description: "Introduction to DC Assistant optimization",
     },
     {
-      title: "Observe with tracing",
+      title: "Observe DC Analysis",
       value: "step1-tracing",
       icon: FlaskConical,
-      description: "Capture every app execution and attach user feedback",
+      description: "Capture agent behavior with MLflow tracing",
     },
     {
-      title: "Create quality metrics",
+      title: "Evaluate Recommendations",
       value: "step2-evaluation",
       icon: Target,
       description:
-        "Create automated quality metrics that align with domain experts",
+        "Create LLM judges for defensive coordinator recommendations",
     },
     {
-      title: "Find & fix quality issues",
+      title: "Collect Ground Truth Labels",
       value: "step3-improvement",
       icon: TrendingUp,
-      description: "Use production traces to test and improve quality",
-    },
-
-    {
-      title: "Production Monitoring",
-      value: "step5-monitoring",
-      icon: Activity,
-      description: "Continuously monitor GenAI quality in production",
+      description: "Create labeled datasets through SME review sessions",
     },
     {
-      title: "Human Review",
-      value: "step6-human-review",
-      icon: Users,
-      description:
-        "Collect expert feedback to improve GenAI quality through structured labeling",
-    },
-    {
-      title: "Link to business KPIs",
+      title: "Align Judges to Experts",
       value: "step4-kpis",
       icon: BarChart3,
       description:
-        "Link GenAI usage data to business KPIs to show ROI from GenAI apps",
+        "Calibrate judges to match coaching expertise with SIMBA/MemAlign",
+    },
+    {
+      title: "Optimize Prompts",
+      value: "step5-monitoring",
+      icon: Activity,
+      description: "Automatically improve prompts with GEPA optimizer",
+    },
+    {
+      title: "Continuous Loop",
+      value: "step6-human-review",
+      icon: Users,
+      description:
+        "Self-optimizing cycle from coach feedback to improved prompts",
     },
     // {
     //   title: "Step 5: Prompt Registry",

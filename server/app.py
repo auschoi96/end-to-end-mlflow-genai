@@ -15,7 +15,7 @@ from mlflow_demo.utils.mlflow_helpers import get_mlflow_experiment_id
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
-from .routes import email, helper
+from .routes import helper  # Removed email routes - not needed for DC Assistant
 
 # Configure logging for Databricks Apps monitoring
 # Logs written to stdout/stderr will be available in Databricks Apps UI and /logz endpoint
@@ -71,7 +71,7 @@ HOST = os.getenv('UVICORN_HOST', '0.0.0.0')
 API_PREFIX = '/api'
 
 # Include route modules
-app.include_router(email.router)
+# app.include_router(email.router)  # Disabled - DC Assistant doesn't need email routes
 app.include_router(helper.router)
 
 

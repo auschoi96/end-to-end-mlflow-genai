@@ -1,6 +1,5 @@
 export type ViewType =
   | "chat"
-  | "email"
   | "dc-assistant"
   | "demo-overview"
   | "step1-tracing"
@@ -8,13 +7,11 @@ export type ViewType =
   | "step3-improvement"
   | "step4-kpis"
   | "step5-monitoring"
-  | "step6-human-review"
-  | "step5-prompt-registry";
+  | "step6-human-review";
 
 export const routes: Record<ViewType, string> = {
   "demo-overview": "/",
   chat: "/chat",
-  email: "/email",
   "dc-assistant": "/dc-assistant",
   "step1-tracing": "/tracing",
   "step2-evaluation": "/evaluation",
@@ -22,7 +19,6 @@ export const routes: Record<ViewType, string> = {
   "step4-kpis": "/kpis",
   "step5-monitoring": "/monitoring",
   "step6-human-review": "/human-review",
-  "step5-prompt-registry": "/prompt-registry",
 };
 
 // Reverse mapping for getting ViewType from path

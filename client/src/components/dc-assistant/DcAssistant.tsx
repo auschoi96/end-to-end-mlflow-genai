@@ -12,8 +12,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { EmailService } from "@/fastapi_client";
-import type { FeedbackRequest } from "@/fastapi_client/models";
 import { useQueryExperiment } from "@/queries/useQueryTracing";
 
 // Question categories and pre-defined questions
@@ -149,10 +147,15 @@ export function DcAssistant({
               if (data.type === "token") {
                 accumulatedContent += data.content;
                 setStreamingContent(accumulatedContent);
-              } else if (data.type === "done" && data.trace_id) {
-                setAnalysis(accumulatedContent);
-                setCurrentTraceId(data.trace_id);
-                onTraceIdGenerated?.(data.trace_id);
+              } else if (data.type === "done") {
+                // Always set the analysis when done, even without trace_id
+                if (accumulatedContent) {
+                  setAnalysis(accumulatedContent);
+                }
+                if (data.trace_id) {
+                  setCurrentTraceId(data.trace_id);
+                  onTraceIdGenerated?.(data.trace_id);
+                }
               } else if (data.type === "error") {
                 setError(data.error);
               }
@@ -175,19 +178,25 @@ export function DcAssistant({
     if (!feedbackRating || !currentTraceId) return;
 
     try {
-      const feedbackData: FeedbackRequest = {
-        trace_id: currentTraceId,
-        rating: feedbackRating,
-        comment: feedbackComment || undefined,
-        sales_rep_name: "Coach",
-      };
+      const response = await fetch("/api/dc-assistant/feedback", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          trace_id: currentTraceId,
+          rating: feedbackRating,
+          comment: feedbackComment || undefined,
+          user_name: "Coach",
+        }),
+      });
 
-      const response = await EmailService.submitFeedbackApiFeedbackPost(feedbackData);
+      const result = await response.json();
 
-      if (response.success) {
+      if (result.success) {
         setFeedbackSubmitted(true);
       } else {
-        setError(response.message);
+        setError(result.message);
       }
     } catch (err) {
       console.error("Error submitting feedback:", err);

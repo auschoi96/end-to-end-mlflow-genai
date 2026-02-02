@@ -110,32 +110,61 @@ CLIENT_SECRET_KEY = CONFIG.get("prompt_registry_auth", {}).get("oauth_client_sec
 DATABRICKS_HOST = CONFIG.get("prompt_registry_auth", {}).get("databricks_host", "")
 
 ############################################
-# Configure manual authentication for Prompt Registry access
-# Prompt Registry requires manual authentication when used with deployed agents
-# See: https://docs.databricks.com/aws/en/generative-ai/agent-framework/agent-authentication#manual-authentication
-############################################
 # Configure authentication for Prompt Registry access
-# These environment variables can be injected at deployment time. When they are
-# missing (e.g., local notebook runs), fall back to the workspace secrets.
-if DATABRICKS_HOST and not os.getenv("DATABRICKS_HOST"):
-    # Remove trailing slash if present (can cause auth issues)
-    host = DATABRICKS_HOST.rstrip("/")
-    os.environ["DATABRICKS_HOST"] = host
+# Priority order:
+# 1. Databricks Apps run_as service principal (automatic - no secrets needed)
+# 2. Environment variables (DATABRICKS_CLIENT_ID/SECRET or DATABRICKS_TOKEN)
+# 3. Workspace secrets (fallback for notebook runs)
+# See: https://docs.databricks.com/aws/en/generative-ai/agent-framework/agent-authentication
+############################################
 
-if "DATABRICKS_CLIENT_ID" not in os.environ:
-    client_id = dbutils.secrets.get(scope=SECRET_SCOPE_NAME, key=CLIENT_ID_KEY)
-    os.environ["DATABRICKS_CLIENT_ID"] = client_id.strip()
+def setup_authentication():
+    """Set up Databricks authentication based on available credentials."""
+    # Set host if configured but not in environment
+    if DATABRICKS_HOST and not os.getenv("DATABRICKS_HOST"):
+        host = DATABRICKS_HOST.rstrip("/")
+        os.environ["DATABRICKS_HOST"] = host
 
-if "DATABRICKS_CLIENT_SECRET" not in os.environ:
-    client_secret = dbutils.secrets.get(scope=SECRET_SCOPE_NAME, key=CLIENT_SECRET_KEY)
-    os.environ["DATABRICKS_CLIENT_SECRET"] = client_secret.strip()
+    # Check if we're running in Databricks Apps with run_as (service principal)
+    # In this case, authentication is automatic - no secrets needed
+    if os.getenv("DATABRICKS_RUNTIME_VERSION") or os.getenv("DB_IS_DRIVER"):
+        # Running in Databricks - use default authentication
+        return WorkspaceClient()
 
-WORKSPACE_CLIENT = WorkspaceClient(
-    host=os.environ.get("DATABRICKS_HOST"),
-    client_id=os.environ.get("DATABRICKS_CLIENT_ID"),
-    client_secret=os.environ.get("DATABRICKS_CLIENT_SECRET"),
-    token=os.environ.get("DATABRICKS_TOKEN"),
-)
+    # Check for existing OAuth credentials in environment
+    if os.getenv("DATABRICKS_CLIENT_ID") and os.getenv("DATABRICKS_CLIENT_SECRET"):
+        return WorkspaceClient(
+            host=os.environ.get("DATABRICKS_HOST"),
+            client_id=os.environ.get("DATABRICKS_CLIENT_ID"),
+            client_secret=os.environ.get("DATABRICKS_CLIENT_SECRET"),
+        )
+
+    # Check for PAT token
+    if os.getenv("DATABRICKS_TOKEN"):
+        return WorkspaceClient(
+            host=os.environ.get("DATABRICKS_HOST"),
+            token=os.environ.get("DATABRICKS_TOKEN"),
+        )
+
+    # Try to load from workspace secrets (for notebook runs)
+    if dbutils:
+        try:
+            client_id = dbutils.secrets.get(scope=SECRET_SCOPE_NAME, key=CLIENT_ID_KEY)
+            client_secret = dbutils.secrets.get(scope=SECRET_SCOPE_NAME, key=CLIENT_SECRET_KEY)
+            os.environ["DATABRICKS_CLIENT_ID"] = client_id.strip()
+            os.environ["DATABRICKS_CLIENT_SECRET"] = client_secret.strip()
+            return WorkspaceClient(
+                host=os.environ.get("DATABRICKS_HOST"),
+                client_id=client_id.strip(),
+                client_secret=client_secret.strip(),
+            )
+        except Exception as e:
+            print(f"Warning: Could not load secrets from scope '{SECRET_SCOPE_NAME}': {e}")
+
+    # Fall back to default authentication (will use ~/.databrickscfg or environment)
+    return WorkspaceClient()
+
+WORKSPACE_CLIENT = setup_authentication()
 
 # Configure MLflow to use Unity Catalog registry
 # This ensures MLflow's internal client uses the correct registry and authentication

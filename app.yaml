@@ -3,10 +3,26 @@ command: [
   "server.app:app"
 ]
 
+# Run as service principal for automatic authentication
+# This eliminates the need for storing OAuth secrets - the app inherits the SP's identity
+run_as:
+  service_principal_name: nethra_austin
+
 permissions:
+  # Model serving endpoints
   - permission: CAN_QUERY
     object_type: serving-endpoints
     object_id: databricks-gpt-5-nano
+  - permission: CAN_QUERY
+    object_type: serving-endpoints
+    object_id: databricks-gpt-5-mini
+  - permission: CAN_QUERY
+    object_type: serving-endpoints
+    object_id: databricks-gpt-5-2
+  # SQL warehouse for Unity Catalog queries
+  - permission: CAN_USE
+    object_type: sql-warehouses
+    object_id: 4b9b953939869799
 
 env:
   - name: 'MLFLOW_TRACKING_URI'
@@ -80,12 +96,8 @@ env:
           ]
         },
         "prompt_registry_auth": {
-          "use_oauth": true,
-          "secret_scope_name": "dc-assistant-secrets",
-          "oauth_client_id_key": "oauth-client-id",
-          "oauth_client_secret_key": "oauth-client-secret",
-          "oauth_client_id": "89b41358-2ef3-4fd3-91cd-2df05813de19",
-          "pat_key": "databricks-pat",
+          "use_service_principal": true,
+          "service_principal_id": "5d5718d0-82bc-4a3f-980f-ae56b792a273",
           "databricks_host": "https://e2-demo-field-eng.cloud.databricks.com/"
         }
       }

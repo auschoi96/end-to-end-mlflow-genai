@@ -145,8 +145,8 @@ valid_traces = mlflow.search_traces(...)  # Same filtering logic
 aligned_judge = football_analysis_judge.align(
     traces=valid_traces,
     optimizer=MemAlignOptimizer(
-        reflection_lm="databricks/databricks-gpt-5-2",
-        embedding_model="openai/text-embedding-3-large"
+        reflection_lm="databricks:/databricks-gpt-5-2",
+        embedding_model="databricks:/databricks-qwen3-embedding-0-6b"
     )
 )
 

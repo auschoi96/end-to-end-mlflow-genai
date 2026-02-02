@@ -26,6 +26,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useQueryPreloadedResults } from "@/queries/useQueryPreloadedResults";
+import { useQueryExperiment } from "@/queries/useQueryTracing";
 import { NotebookReference } from "@/components/notebook-reference";
 
 const introContent = `
@@ -488,7 +489,13 @@ export function EvaluationBuilder() {
 
   const { data: preloadedResultsData, isLoading: isPreloadedResultsLoading } =
     useQueryPreloadedResults();
-  const preloadedResultsUrl = preloadedResultsData?.metrics_result_url;
+  const { data: experimentData, isLoading: isExperimentLoading } =
+    useQueryExperiment();
+
+  // Build evaluation-runs URL from experiment data
+  const evaluationRunsUrl = experimentData?.link
+    ? experimentData.link.replace("?compareRunsMode=TRACES", "/evaluation-runs")
+    : null;
 
   const demoSection = (
     <div className="space-y-6">
@@ -541,13 +548,19 @@ export function EvaluationBuilder() {
                         type="checkbox"
                         id={`judge-${index}`}
                         checked={judge.enabled}
-                        disabled={true}
-                        className="mt-1"
+                        onChange={() => {
+                          setBuiltinJudges(prev =>
+                            prev.map((j, i) =>
+                              i === index ? { ...j, enabled: !j.enabled } : j
+                            )
+                          );
+                        }}
+                        className="mt-1 cursor-pointer"
                       />
                       <div className="flex-1">
                         <Label
                           htmlFor={`judge-${index}`}
-                          className="font-medium text-sm"
+                          className="font-medium text-sm cursor-pointer"
                         >
                           {judge.name}
                         </Label>
@@ -595,11 +608,23 @@ export function EvaluationBuilder() {
                       <Input
                         id={`guideline-name-${guideline.id}`}
                         value={guideline.name}
-                        disabled={true}
+                        onChange={(e) =>
+                          updateGuideline(guideline.id, "name", e.target.value)
+                        }
                         placeholder="e.g., Email Professionalism"
                         className="mt-1"
                       />
                     </div>
+                    {guidelines.length > 1 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeGuideline(guideline.id)}
+                        className="text-red-500 hover:text-red-700 mt-6"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
 
                   <div>
@@ -609,7 +634,9 @@ export function EvaluationBuilder() {
                     <Textarea
                       id={`guideline-content-${guideline.id}`}
                       value={guideline.content}
-                      disabled={true}
+                      onChange={(e) =>
+                        updateGuideline(guideline.id, "content", e.target.value)
+                      }
                       rows={8}
                       className="mt-1 font-mono text-xs"
                       placeholder="Define your custom evaluation guidelines..."
@@ -619,12 +646,12 @@ export function EvaluationBuilder() {
               ))}
             </div>
 
-            {/* <div className="flex gap-2">
-              <Button size="sm" variant="outline">
-                Preview
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={addGuideline}>
+                <Plus className="h-4 w-4 mr-1" />
+                Add Guideline
               </Button>
-              <Button size="sm">Create Judge</Button>
-            </div> */}
+            </div>
           </CardContent>
         </Card>
 
@@ -671,10 +698,10 @@ export function EvaluationBuilder() {
               variant="open_mlflow_ui"
               size="lg"
               onClick={() =>
-                preloadedResultsUrl &&
-                window.open(preloadedResultsUrl, "_blank")
+                evaluationRunsUrl &&
+                window.open(evaluationRunsUrl, "_blank")
               }
-              disabled={isPreloadedResultsLoading || !preloadedResultsUrl}
+              disabled={isExperimentLoading || !evaluationRunsUrl}
             >
               <ExternalLink className="h-4 w-4 mr-2" />
               View Results

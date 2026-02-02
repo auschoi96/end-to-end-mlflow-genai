@@ -7,6 +7,7 @@ import { DcTracingDemo } from "@/components/dc-assistant/DcTracingDemo";
 import { Button } from "@/components/ui/button";
 import { ExternalLink } from "lucide-react";
 import { useQueryPreloadedResults } from "@/queries/useQueryPreloadedResults";
+import { useQueryExperiment } from "@/queries/useQueryTracing";
 import { NotebookReference } from "@/components/notebook-reference";
 
 const introContent = `
@@ -310,7 +311,12 @@ The diff below shows how to add advanced tracing features:`}
 
   const { data: preloadedResultsData, isLoading: isPreloadedResultsLoading } =
     useQueryPreloadedResults();
+  const { data: experimentData, isLoading: isExperimentLoading } =
+    useQueryExperiment();
   const preloadedTraceUrl = preloadedResultsData?.sample_trace_url;
+
+  // Build fallback traces URL from experiment data if sample trace URL isn't available
+  const tracesListUrl = experimentData?.link;
 
   const demoSection = (
     <div className="space-y-8">
@@ -328,17 +334,18 @@ The diff below shows how to add advanced tracing features:`}
         <div className="ml-11 space-y-3">
           <p className="text-muted-foreground">
             Start by viewing a pre-generated example to see how traces capture
-            email generation and user feedback.
+            DC analysis and user feedback.
           </p>
 
           <div className="p-4 bg-muted/30 rounded-lg border">
             <Button
               variant="open_mlflow_ui"
               size="lg"
-              disabled={isPreloadedResultsLoading || !preloadedTraceUrl}
-              onClick={() =>
-                preloadedTraceUrl && window.open(preloadedTraceUrl, "_blank")
-              }
+              disabled={isPreloadedResultsLoading && isExperimentLoading}
+              onClick={() => {
+                const url = preloadedTraceUrl || tracesListUrl;
+                if (url) window.open(url, "_blank");
+              }}
             >
               <ExternalLink className="h-4 w-4 mr-2" />
               View sample trace

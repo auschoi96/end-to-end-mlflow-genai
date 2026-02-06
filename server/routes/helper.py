@@ -6,14 +6,16 @@ from fastapi import APIRouter
 
 
 def ensure_https_protocol(host: str | None) -> str:
-  """Ensure the host URL has HTTPS protocol."""
+  """Ensure the host URL has HTTPS protocol and strip trailing slashes."""
   if not host:
     return ''
 
-  if host.startswith('https://') or host.startswith('http://'):
-    return host
+  # Add protocol if missing
+  if not (host.startswith('https://') or host.startswith('http://')):
+    host = f'https://{host}'
 
-  return f'https://{host}'
+  # Strip trailing slashes to avoid double slashes when concatenating paths
+  return host.rstrip('/')
 
 
 router = APIRouter(prefix='/api', tags=['helper'])

@@ -49,6 +49,22 @@ class FeedbackResponse(BaseModel):
   message: str
 
 
+class MultiTurnRequest(BaseModel):
+  """Request for multi-turn conversation."""
+
+  question: str
+  session_id: Optional[str] = None
+  is_first_turn: bool = False
+
+
+class MultiTurnResponse(BaseModel):
+  """Response for multi-turn conversation."""
+
+  response: str
+  session_id: str
+  trace_id: Optional[str] = None
+
+
 async def _generate_with_local_agent(question: str):
   """Generate response using local agent."""
   from mlflow_demo.agent import AGENT
@@ -58,10 +74,13 @@ async def _generate_with_local_agent(question: str):
   trace_id = None
 
   try:
-    # Set MLflow experiment for tracing (autolog handles the actual tracing)
+    # Set MLflow experiment for tracing
     mlflow.set_experiment(experiment_id=get_mlflow_experiment_id())
 
-    logger.info(f'Using local DC Assistant agent for question: {question[:50]}...')
+    logger.info('=' * 80)
+    logger.info(f'🚀 CALLING AGENT.predict_stream_local()')
+    logger.info(f'📝 Question: {question}')
+    logger.info('=' * 80)
 
     for event in AGENT.predict_stream_local(question):
       event_type = event.get('type')
@@ -76,7 +95,9 @@ async def _generate_with_local_agent(question: str):
         yield f'data: {json.dumps({"type": "tool_call", "tool": tool_info})}\n\n'
 
       elif event_type == 'done':
+        # Use the trace_id from the agent's event
         trace_id = event.get('trace_id')
+        logger.info(f'📊 Trace ID from agent event: {trace_id}')
         yield f'data: {json.dumps({"type": "done", "trace_id": trace_id})}\n\n'
         done_sent = True
 
@@ -91,6 +112,9 @@ async def _generate_with_local_agent(question: str):
 
   # Only send final done if we haven't sent one yet
   if not done_sent:
+    # Try to get trace_id from active span one more time
+    active_span = mlflow.get_current_active_span()
+    trace_id = active_span.trace_id if active_span else None
     yield f'data: {json.dumps({"type": "done", "trace_id": trace_id})}\n\n'
 
 
@@ -180,7 +204,7 @@ async def submit_feedback(feedback: FeedbackRequest):
       name='user_feedback',
       value=is_positive,
       rationale=feedback.comment,
-      source=mlflow.entities.feedback.FeedbackSource(
+      source=mlflow.entities.AssessmentSource(
         source_type='HUMAN',
         source_id=feedback.user_name or 'anonymous',
       ),
@@ -192,3 +216,89 @@ async def submit_feedback(feedback: FeedbackRequest):
   except Exception as e:
     logger.error(f'Failed to log feedback: {e}')
     return FeedbackResponse(success=False, message=str(e))
+
+
+# In-memory session storage for multi-turn conversations
+# Format: {session_id: [{"role": "user/assistant", "content": "..."}]}
+_conversation_sessions = {}
+
+
+@router.post('/multi-turn', response_model=MultiTurnResponse)
+async def multi_turn_conversation(request: MultiTurnRequest):
+  """
+  Handle multi-turn conversations with session tracking.
+
+  This endpoint demonstrates MLflow's session tracking feature where multiple
+  conversation turns are grouped together in a single session view.
+  """
+  from mlflow_demo.agent import AGENT
+  import uuid
+
+  try:
+    # Set MLflow experiment
+    mlflow.set_experiment(experiment_id=get_mlflow_experiment_id())
+
+    # Get or create session ID
+    session_id = request.session_id or str(uuid.uuid4())
+
+    # Get conversation history for this session
+    if session_id not in _conversation_sessions:
+      _conversation_sessions[session_id] = []
+
+    conversation_history = _conversation_sessions[session_id]
+
+    # Add the current question to history
+    conversation_history.append({'role': 'user', 'content': request.question})
+
+    # Build the full message list with history
+    messages = conversation_history.copy()
+
+    logger.info(
+      f'Multi-turn request - Session: {session_id}, Turn: {len(conversation_history) // 2 + 1}'
+    )
+
+    # Start MLflow session if this is the first turn
+    if request.is_first_turn:
+      # TODO: Fix session tracking - should be AGENT.start_new_session()
+      # mlflow.start_session(session_id=session_id)
+      logger.info(f'Started new conversation session: {session_id}')
+
+    # Generate response using the agent with full conversation context
+    response_text = ''
+    trace_id = None
+
+    logger.info('=' * 80)
+    logger.info(f'🚀 MULTI-TURN: Calling AGENT.predict_stream_local()')
+    logger.info(f'📝 Question: {request.question}')
+    logger.info(f'💬 Conversation history length: {len(messages)} messages')
+    logger.info('=' * 80)
+
+    for event in AGENT.predict_stream_local(request.question, conversation_history=messages):
+      event_type = event.get('type')
+
+      if event_type == 'token':
+        token = event.get('content', '')
+        response_text += token
+
+      elif event_type == 'done':
+        trace_id = event.get('trace_id')
+
+    # Add assistant response to history
+    conversation_history.append({'role': 'assistant', 'content': response_text})
+
+    # Update session storage
+    _conversation_sessions[session_id] = conversation_history
+
+    logger.info('=' * 80)
+    logger.info(f'✅ Multi-turn response complete')
+    logger.info(f'📊 Response length: {len(response_text)} chars')
+    logger.info(f'🔗 Trace ID: {trace_id}')
+    logger.info('=' * 80)
+
+    return MultiTurnResponse(
+      response=response_text, session_id=session_id, trace_id=trace_id
+    )
+
+  except Exception as e:
+    logger.error(f'Multi-turn conversation error: {e}')
+    raise

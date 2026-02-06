@@ -4,6 +4,7 @@ import { CodeSnippet } from "@/components/code-snippet";
 import { CollapsibleSection } from "@/components/collapsible-section";
 import { MarkdownContent } from "@/components/markdown-content";
 import { DcTracingDemo } from "@/components/dc-assistant/DcTracingDemo";
+import { MultiTurnDemo } from "@/components/dc-assistant/MultiTurnDemo";
 import { Button } from "@/components/ui/button";
 import { ExternalLink } from "lucide-react";
 import { useQueryPreloadedResults } from "@/queries/useQueryPreloadedResults";
@@ -370,6 +371,28 @@ The diff below shows how to add advanced tracing features:`}
           </p>
 
           <DcTracingDemo />
+        </div>
+      </div>
+
+      {/* Step 3: Multi-Turn Conversations */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center w-8 h-8 bg-purple-100 text-purple-600 rounded-full font-semibold text-sm">
+            3
+          </div>
+          <h3 className="text-lg font-semibold">
+            Explore multi-turn conversations with session tracking
+          </h3>
+        </div>
+
+        <div className="ml-11 space-y-4">
+          <p className="text-muted-foreground">
+            Real coaching conversations aren't single questions—they involve follow-ups that
+            build on previous context. See how MLflow groups related turns together in a
+            single session trace, making it easy to understand and debug conversational AI.
+          </p>
+
+          <MultiTurnDemo />
         </div>
       </div>
     </div>

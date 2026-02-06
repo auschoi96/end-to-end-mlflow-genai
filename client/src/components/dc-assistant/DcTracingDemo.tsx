@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { MarkdownContent } from "@/components/markdown-content";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -98,6 +99,17 @@ export function DcTracingDemo({ onTraceGenerated }: DcTracingDemoProps = {}) {
   const [feedbackRating, setFeedbackRating] = useState<"up" | "down" | null>(null);
   const [feedbackComment, setFeedbackComment] = useState("");
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const [traceUrlTemplate, setTraceUrlTemplate] = useState<string>("");
+
+  // Fetch experiment info on mount
+  React.useEffect(() => {
+    fetch('/api/tracing_experiment')
+      .then(res => res.json())
+      .then(data => {
+        setTraceUrlTemplate(data.trace_url_template);
+      })
+      .catch(err => console.error('Failed to fetch experiment info:', err));
+  }, []);
 
   const selectedAnalysis = ANALYSIS_TYPES.find(a => a.id === selectedAnalysisType);
 
@@ -209,8 +221,10 @@ export function DcTracingDemo({ onTraceGenerated }: DcTracingDemoProps = {}) {
                   status: "success"
                 };
                 setToolCalls(prev => [...prev, toolCall]);
-              } else if (data.type === "done" && data.trace_id) {
-                setCurrentTraceId(data.trace_id);
+              } else if (data.type === "done") {
+                // Set trace ID even if it's null (allows feedback section to show)
+                setCurrentTraceId(data.trace_id || null);
+                console.log("Received trace_id:", data.trace_id);
                 // Process any tool calls from the done event
                 if (data.tool_calls && Array.isArray(data.tool_calls)) {
                   const calls = data.tool_calls.map((tc: any) => ({
@@ -449,94 +463,120 @@ export function DcTracingDemo({ onTraceGenerated }: DcTracingDemoProps = {}) {
               </div>
             )}
 
-            {isStreaming || streamingContent ? (
-              <div className="space-y-4">
-                <div className="prose prose-sm max-w-none dark:prose-invert">
-                  <pre className="whitespace-pre-wrap font-sans text-sm">
-                    {isStreaming ? streamingContent : streamingContent}
-                  </pre>
-                </div>
+            {/* Loading state while generating */}
+            {isStreaming && !streamingContent ? (
+              <div className="flex flex-col items-center justify-center py-12 space-y-4">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">Response generating...</p>
+              </div>
+            ) : null}
 
-                {currentTraceId && (
-                  <div className="pt-4 border-t space-y-4">
-                    {/* Trace Link */}
-                    <div>
-                      <Label className="text-xs text-muted-foreground">
-                        MLflow Trace
-                      </Label>
-                      <div className="mt-2 flex items-center gap-2">
-                        <code className="text-xs bg-muted px-2 py-1 rounded flex-1 truncate">
-                          {currentTraceId}
-                        </code>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            const experimentId = process.env.MLFLOW_EXPERIMENT_ID || '2517718719552044';
-                            const traceUrl = `https://e2-demo-field-eng.cloud.databricks.com/ml/experiments/${experimentId}/traces?o=1444828305810485&sqlWarehouseId=4b9b953939869799&selectedEvaluationId=${currentTraceId}`;
-                            window.open(traceUrl, '_blank');
-                          }}
-                        >
-                          <ExternalLink className="h-3 w-3 mr-1" />
-                          View Trace
-                        </Button>
-                      </div>
+            {/* Show streaming content */}
+            {streamingContent ? (
+              <div className="space-y-4">
+                <MarkdownContent content={streamingContent} />
+
+                {/* Show feedback and trace button only after streaming completes */}
+                {!isStreaming && (
+                  <>
+                    {/* Feedback Section */}
+                    <div className="border-t pt-6">
+                      <h4 className="font-medium mb-4">How is this response?</h4>
+
+                      {feedbackSubmitted ? (
+                        <div className="flex items-center gap-2 text-green-600">
+                          <CheckCircle2 className="h-5 w-5" />
+                          <span className="font-medium">
+                            Thank you for your feedback!
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="flex gap-4">
+                            <Button
+                              variant={feedbackRating === "up" ? "default" : "outline"}
+                              size="lg"
+                              onClick={() => setFeedbackRating("up")}
+                              className="flex-1"
+                            >
+                              <ThumbsUp className="mr-2 h-5 w-5" />
+                              Good
+                            </Button>
+                            <Button
+                              variant={feedbackRating === "down" ? "default" : "outline"}
+                              size="lg"
+                              onClick={() => setFeedbackRating("down")}
+                              className="flex-1"
+                            >
+                              <ThumbsDown className="mr-2 h-5 w-5" />
+                              Needs Improvement
+                            </Button>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="feedback-comment">
+                              Additional Comments (Optional)
+                            </Label>
+                            <Textarea
+                              id="feedback-comment"
+                              value={feedbackComment}
+                              onChange={(e) => setFeedbackComment(e.target.value)}
+                              placeholder="What could be improved? What did you like?"
+                              rows={3}
+                            />
+                          </div>
+
+                          <Button
+                            onClick={handleFeedbackSubmit}
+                            disabled={!feedbackRating || !currentTraceId}
+                            className="w-full"
+                          >
+                            Submit Feedback
+                          </Button>
+
+                          {!currentTraceId && (
+                            <p className="text-xs text-muted-foreground text-center">
+                              Trace ID required for feedback submission
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
 
-                    {/* Feedback Section */}
-                    {!feedbackSubmitted && (
-                      <div className="space-y-3">
-                        <Label className="text-xs text-muted-foreground">
-                          Submit Coaching Feedback
-                        </Label>
-                        <div className="flex items-center gap-2">
+                    {/* Trace Section - only show if we have both template and trace ID */}
+                    {traceUrlTemplate && currentTraceId && (
+                      <div className="border-t pt-6">
+                        <div className="flex items-center justify-between mb-4">
+                          <h4 className="font-medium">
+                            See trace & feedback in MLflow UI
+                          </h4>
                           <Button
-                            variant={feedbackRating === "up" ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => setFeedbackRating("up")}
+                            variant="default"
+                            size="lg"
+                            onClick={() => {
+                              const traceUrl = `${traceUrlTemplate}${currentTraceId}`;
+                              window.open(traceUrl, '_blank');
+                            }}
+                            className="bg-blue-600 hover:bg-blue-700"
                           >
-                            <ThumbsUp className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant={feedbackRating === "down" ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => setFeedbackRating("down")}
-                          >
-                            <ThumbsDown className="h-4 w-4" />
+                            <ExternalLink className="h-4 w-4 mr-2" />
+                            View Trace
                           </Button>
                         </div>
-                        <Textarea
-                          placeholder="Optional: Add your coaching feedback..."
-                          value={feedbackComment}
-                          onChange={(e) => setFeedbackComment(e.target.value)}
-                          className="min-h-[80px]"
-                        />
-                        <Button
-                          onClick={handleFeedbackSubmit}
-                          disabled={!feedbackRating}
-                          size="sm"
-                        >
-                          Submit Feedback
-                        </Button>
                       </div>
                     )}
-
-                    {feedbackSubmitted && (
-                      <Alert>
-                        <AlertDescription>
-                          ✓ Feedback submitted successfully
-                        </AlertDescription>
-                      </Alert>
-                    )}
-                  </div>
+                  </>
                 )}
               </div>
-            ) : (
+            ) : null}
+
+            {/* Initial empty state */}
+            {!isStreaming && !streamingContent ? (
               <div className="text-center py-12 text-muted-foreground">
                 <p>Configure your question and click Analyze to see the agent in action</p>
                 <p className="text-xs mt-2">Tool calls and streaming response will appear here</p>
               </div>
-            )}
+            ) : null}
           </CardContent>
         </Card>
       </div>

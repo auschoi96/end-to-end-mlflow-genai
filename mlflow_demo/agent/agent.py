@@ -104,6 +104,8 @@ CONFIG = load_config()
 PROMPT_NAME = CONFIG["prompt_registry"]["prompt_name"]
 LLM_ENDPOINT_NAME = CONFIG["llm"]["endpoint_name"]
 UC_TOOL_NAMES = CONFIG["tools"].get("uc_tool_names", [])
+UC_CATALOG = CONFIG["workspace"]["catalog"]
+UC_SCHEMA = CONFIG["workspace"]["schema"]
 SECRET_SCOPE_NAME = CONFIG.get("prompt_registry_auth", {}).get("secret_scope_name", "dc-assistant-secrets")
 CLIENT_ID_KEY = CONFIG.get("prompt_registry_auth", {}).get("oauth_client_id_key", "oauth-client-id")
 CLIENT_SECRET_KEY = CONFIG.get("prompt_registry_auth", {}).get("oauth_client_secret_key", "oauth-client-secret")
@@ -173,8 +175,17 @@ mlflow.set_registry_uri("databricks-uc")
 ############################################
 # Define your LLM endpoint and system prompt
 ############################################
-PROMPT_URI_AGENT = f"prompts:/{PROMPT_NAME}@production"
-SYSTEM_PROMPT = mlflow.genai.load_prompt(PROMPT_URI_AGENT)
+PROMPT_URI_AGENT = f"prompts:/{UC_CATALOG}.{UC_SCHEMA}.{PROMPT_NAME}@production"
+try:
+    SYSTEM_PROMPT = mlflow.genai.load_prompt(PROMPT_URI_AGENT)
+except Exception as e:
+    # For local development, use a default prompt if registry prompt doesn't exist
+    warnings.warn(f"Could not load prompt from registry: {e}. Using default system prompt for local testing.")
+    class FallbackPrompt:
+        def format(self, **kwargs):
+            return "You are a helpful NFL defensive coordinator assistant. Analyze game data and provide insights about team tendencies, player performance, and strategic recommendations."
+    SYSTEM_PROMPT = FallbackPrompt()
+
 
 ###############################################################################
 ## Define tools for your agent, enabling it to retrieve data or take actions
@@ -367,10 +378,18 @@ class ToolCallingAgent(ResponsesAgent):
             messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT.format()})
         yield from self.call_and_run_tools(messages=messages)
 
-    def predict_stream_local(self, question: str) -> Generator[dict, None, None]:
+    @mlflow.trace(name="dc_assistant_analysis")
+    def predict_stream_local(
+        self, question: str, conversation_history: Optional[list[dict]] = None
+    ) -> Generator[dict, None, None]:
         """Stream a response for the given question (local convenience method).
 
         This wraps the ResponsesAgent predict_stream for easier use with FastAPI routes.
+
+        Args:
+            question: The user's question
+            conversation_history: Optional list of prior conversation messages
+                                 Format: [{"role": "user/assistant", "content": "..."}]
 
         Yields dicts with keys:
             - type: 'token', 'tool_call', 'done', or 'error'
@@ -379,10 +398,24 @@ class ToolCallingAgent(ResponsesAgent):
             - trace_id: MLflow trace ID (for type='done')
             - error: error message (for type='error')
         """
-        input_msg = Message(role="user", content=question)
-        request = ResponsesAgentRequest(input=[input_msg])
+        # Build input messages - use conversation history if provided
+        if conversation_history:
+            # Use the full conversation history
+            input_messages = [
+                Message(role=msg["role"], content=msg["content"]) for msg in conversation_history
+            ]
+        else:
+            # Single turn - just the current question
+            input_messages = [Message(role="user", content=question)]
+
+        request = ResponsesAgentRequest(input=input_messages)
 
         try:
+            # Capture the trace ID from the @mlflow.trace span immediately,
+            # before autolog creates nested spans that could change the context
+            active_span = mlflow.get_current_active_span()
+            trace_id = active_span.trace_id if active_span else None
+
             for event in self.predict_stream(request):
                 if event.type == "response.output_item.done":
                     item = event.item
@@ -414,12 +447,9 @@ class ToolCallingAgent(ResponsesAgent):
                         if text:
                             yield {"type": "token", "content": text}
 
-            # Done - get trace ID
-            try:
-                trace = mlflow.get_current_active_trace()
-                trace_id = trace.info.request_id if trace else None
-            except Exception:
-                trace_id = None
+            # Fall back to get_last_active_trace_id if span wasn't available at start
+            if not trace_id:
+                trace_id = mlflow.get_last_active_trace_id()
 
             yield {"type": "done", "trace_id": trace_id}
 

@@ -32,48 +32,11 @@ import ReactDiffViewer from "react-diff-viewer";
 const introContent = `
 # Align Judges to Coaching Expertise
 
-Generic LLM judges evaluate outputs based on universal criteria, but they miss the domain-specific nuance that experts understand intuitively. A judge might score an analysis highly because it "sounds good," while a coach knows it's using the wrong data scope or missing key strategic implications.
+You've created baseline judges and collected expert labels — but your judges and your coaches likely disagree. A generic judge might score an analysis 5/5 because it "sounds good," while a coach gives it 2/5 because it discussed tendencies when they asked for a play sequence.
 
-## Why Judge Alignment Matters
+**Judge alignment automatically calibrates your judges to match expert preferences.** The optimizer analyzes disagreements between human labels and judge scores, then refines judge instructions to encode domain-specific expertise. The result: scalable quality assessment that reflects coaching judgment, not generic LLM preferences.
 
-**The Problem**: Without alignment, judges are unreliable proxies for expert judgment
-- Generic judges can't distinguish between "3rd down tendencies" vs "3rd and long red zone tendencies"
-- They miss when responses use all-field data to answer scoped questions
-- They don't understand multi-part question structures coaches use
-- They award perfect scores for responses that coaches would rate as incomplete
-
-**The Solution**: Judge alignment automatically calibrates judges to match expert preferences
-- Uses labeled dataset from SME review sessions (previous step)
-- Optimizer analyzes disagreements between human labels and judge scores
-- Refines judge instructions to encode domain-specific expertise
-- Result: Scalable quality assessment that reflects coaching judgment
-
-## Two Approaches to Judge Alignment
-
-MLflow provides two optimization algorithms that transform your baseline judges into expert-calibrated evaluators. Both use your labeled data but take different approaches to learning:
-
-### SIMBA (Stochastic Introspective Mini-Batch Ascent)
-**How it works:** Iterative refinement through failure analysis
-- Identifies traces where judge disagrees with coach
-- Uses reflection LLM to analyze *why* the disagreement occurred
-- Proposes specific edits to judge instructions
-- Repeats across multiple iterations until alignment improves
-
-**Think of it as:** A writing tutor who reviews your mistakes, explains what went wrong, and suggests specific revisions to your instructions
-
-**Best for:** MLflow 3.8 and below, or when you want the proven DSPy-based approach
-
-### MemAlign (Dual-Memory Framework) - Recommended
-**How it works:** Fast learning through dual memory systems
-- **Semantic Memory**: Extracts general principles from labeled data ("sequence questions need ordered steps")
-- **Episodic Memory**: Stores specific examples as reference cases
-- Combines both to guide judge decisions on new traces
-
-**Think of it as:** A coach who learns general rules (semantic) but also remembers specific game situations (episodic) to make better calls
-
-**Best for:** MLflow 3.9+, small datasets (2-10 examples), cost/speed-sensitive applications. Up to 100x faster and 10x cheaper than SIMBA.
-
-Both optimizers take the same input (labeled traces) and produce aligned judges that better match expert judgment.
+MLflow provides two alignment algorithms — **SIMBA** (iterative instruction editing) and **MemAlign** (dual-memory learning, recommended for MLflow 3.9+). Both take labeled traces from the previous step and produce aligned judges that better match expert judgment.
 `;
 
 const originalInstructions = `Evaluate if the response in {{ outputs }} appropriately analyzes the available data and provides an actionable recommendation the question in {{ inputs }}. The response should be accurate, contextually relevant, and give a strategic advantage to the  person making the request. Your grading criteria should be:  1: Completely unacceptable. Incorrect data interpretation or no recommendations 2: Mostly unacceptable. Irrelevant or spurious feedback or weak recommendations provided with minimal strategic advantage 3: Somewhat acceptable. Relevant feedback provided with some strategic advantage 4: Mostly acceptable. Relevant feedback provided with strong strategic advantage 5 Completely acceptable. Relevant feedback provided with excellent strategic advantage`;

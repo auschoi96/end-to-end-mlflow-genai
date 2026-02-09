@@ -286,7 +286,7 @@ def _safe_parse_tool_arguments(raw_args: Any) -> dict:
 
 class ToolCallingAgent(ResponsesAgent):
     """
-    Class representing a tool-calling Agent
+    Class representing a tool-calling Agent with multi-session tracking
     """
 
     def __init__(
@@ -302,6 +302,31 @@ class ToolCallingAgent(ResponsesAgent):
             self.workspace_client.serving_endpoints.get_open_ai_client()
         )
         self._tools_dict = {tool.name: tool for tool in tools}
+
+        # Session tracking - automatically managed
+        self.current_session_id: Optional[str] = None
+        self.current_user_id: Optional[str] = None
+
+        # Conversation history for multi-turn conversations
+        self.conversation_history: list[dict] = []
+
+    def start_new_session(self, session_id: Optional[str] = None, user_id: Optional[str] = None) -> str:
+        """
+        Start a new conversation session for multi-turn tracking.
+        Clears conversation history and creates a new session ID.
+
+        Returns:
+            The new session ID
+        """
+        self.current_session_id = session_id if session_id else str(uuid4())
+        if user_id:
+            self.current_user_id = user_id
+        self.conversation_history = []
+        return self.current_session_id
+
+    def get_current_session_id(self) -> Optional[str]:
+        """Get the current session ID."""
+        return self.current_session_id
 
     def get_tool_specs(self) -> list[dict]:
         """Returns tool specifications in the format OpenAI expects."""
@@ -362,21 +387,100 @@ class ToolCallingAgent(ResponsesAgent):
             item=self.create_text_output_item("Max iterations reached. Stopping.", str(uuid4())),
         )
 
+    @mlflow.trace(span_type=SpanType.AGENT)
     def predict(self, request: ResponsesAgentRequest) -> ResponsesAgentResponse:
-        outputs = [
-            event.item
-            for event in self.predict_stream(request)
-            if event.type == "response.output_item.done"
-        ]
-        return ResponsesAgentResponse(output=outputs, custom_outputs=request.custom_inputs)
+        # Auto-generate session on first call
+        if self.current_session_id is None:
+            self.current_session_id = str(uuid4())
+
+        # Set trace metadata for session tracking
+        metadata = {"mlflow.trace.session": self.current_session_id}
+        if self.current_user_id:
+            metadata["mlflow.trace.user"] = self.current_user_id
+        mlflow.update_current_trace(metadata=metadata)
+
+        # Extract user input for clean display
+        user_content = None
+        for item in request.input:
+            item_dict = item.model_dump() if hasattr(item, 'model_dump') else item
+            if item_dict.get("role") == "user":
+                content = item_dict.get("content")
+                if isinstance(content, list) and len(content) > 0:
+                    user_content = content[0].get("text") if isinstance(content[0], dict) else str(content[0])
+                else:
+                    user_content = str(content)
+                break
+
+        with mlflow.start_span(name="conversation_turn", span_type=SpanType.AGENT) as span:
+            span.set_inputs({"request": user_content})
+
+            outputs = [
+                event.item
+                for event in self.predict_stream(request)
+                if event.type == "response.output_item.done"
+            ]
+
+            # Extract final assistant message for clean display
+            assistant_response = None
+            final_message = None
+            for item in reversed(outputs):
+                item_dict = item.model_dump() if hasattr(item, 'model_dump') else (item if isinstance(item, dict) else {})
+                if item_dict.get("type") == "message" and item_dict.get("role") == "assistant":
+                    final_message = item
+                    content = item_dict.get("content", [])
+                    if isinstance(content, list) and len(content) > 0:
+                        if isinstance(content[0], dict) and "text" in content[0]:
+                            assistant_response = content[0]["text"]
+                            break
+
+            if assistant_response:
+                span.set_outputs({"response": assistant_response})
+
+        return ResponsesAgentResponse(
+            output=[final_message] if final_message else outputs,
+            custom_outputs=request.custom_inputs
+        )
 
     def predict_stream(
         self, request: ResponsesAgentRequest
     ) -> Generator[ResponsesAgentStreamEvent, None, None]:
-        messages = to_chat_completions_input([i.model_dump() for i in request.input])
+        # Extract current user input
+        current_input = [i.model_dump() for i in request.input]
+
+        # Merge conversation history with current request
+        all_input_items = []
+        for hist_msg in self.conversation_history:
+            all_input_items.append(hist_msg)
+        all_input_items.extend(current_input)
+
+        # Convert to chat completion format
+        messages = to_chat_completions_input(all_input_items)
         if SYSTEM_PROMPT:
             messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT.format()})
-        yield from self.call_and_run_tools(messages=messages)
+
+        # Collect assistant response while streaming
+        assistant_response = None
+
+        for event in self.call_and_run_tools(messages=messages):
+            yield event
+
+            # Extract text response from message items
+            if event.type == "response.output_item.done" and hasattr(event, 'item'):
+                item = event.item
+                if isinstance(item, dict):
+                    if item.get("type") == "message" and item.get("role") == "assistant":
+                        content = item.get("content", [])
+                        if isinstance(content, list) and len(content) > 0:
+                            if isinstance(content[0], dict) and "text" in content[0]:
+                                assistant_response = content[0]["text"]
+
+        # Save current turn to conversation history for next time
+        self.conversation_history.extend(current_input)
+        if assistant_response:
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": [{"type": "text", "text": assistant_response}]
+            })
 
     @mlflow.trace(name="dc_assistant_analysis")
     def predict_stream_local(
@@ -416,6 +520,11 @@ class ToolCallingAgent(ResponsesAgent):
             active_span = mlflow.get_current_active_span()
             trace_id = active_span.trace_id if active_span else None
 
+            # Set clean request preview for MLflow UI
+            mlflow.update_current_trace(request_preview=question)
+
+            full_response = ''
+
             for event in self.predict_stream(request):
                 if event.type == "response.output_item.done":
                     item = event.item
@@ -438,14 +547,21 @@ class ToolCallingAgent(ResponsesAgent):
                         if content and isinstance(content, list):
                             for c in content:
                                 if isinstance(c, dict) and c.get("type") == "output_text":
-                                    yield {"type": "token", "content": c.get("text", "")}
+                                    text = c.get("text", "")
+                                    full_response += text
+                                    yield {"type": "token", "content": text}
 
                 elif event.type == "response.content_part.delta":
                     delta = event.delta if hasattr(event, "delta") else None
                     if delta:
                         text = delta.get("text") if isinstance(delta, dict) else getattr(delta, "text", None)
                         if text:
+                            full_response += text
                             yield {"type": "token", "content": text}
+
+            # Set clean response preview for MLflow UI
+            if full_response:
+                mlflow.update_current_trace(response_preview=full_response)
 
             # Fall back to get_last_active_trace_id if span wasn't available at start
             if not trace_id:

@@ -82,6 +82,7 @@ class ExperimentInfo(BaseModel):
   experiment_id: str
   link: str
   trace_url_template: str
+  session_url_template: str
   failed_traces_url: str
   eval_dataset_url: str
   monitoring_url: str
@@ -119,13 +120,26 @@ async def experiment():
   """Get the MLFlow experiment info."""
   databricks_host = ensure_https_protocol(os.getenv('DATABRICKS_HOST'))
 
+  experiment_id = get_mlflow_experiment_id()
+  workspace_id = os.getenv('DATABRICKS_WORKSPACE_ID', '')
+  sql_warehouse_id = os.getenv('SQL_WAREHOUSE_ID', '')
+
+  # Build session URL with optional workspace and warehouse params
+  session_params = [f'sessionId={{sessionId}}']
+  if workspace_id:
+    session_params.append(f'o={workspace_id}')
+  if sql_warehouse_id:
+    session_params.append(f'sqlWarehouseId={sql_warehouse_id}')
+  session_query = '&'.join(session_params)
+
   return ExperimentInfo(
-    experiment_id=get_mlflow_experiment_id(),
-    link=f'{databricks_host}/ml/experiments/{get_mlflow_experiment_id()}?compareRunsMode=TRACES',
-    trace_url_template=f'{databricks_host}/ml/experiments/{get_mlflow_experiment_id()}/traces?selectedEvaluationId=',
-    failed_traces_url=f'{databricks_host}/ml/experiments/{get_mlflow_experiment_id()}/traces?&filter=TAG%3A%3A%3D%3A%3Ayes%3A%3Aeval_example&filter=ASSESSMENT%3A%3A%3D%3A%3Ano%3A%3Aaccuracy',
-    eval_dataset_url=f'{databricks_host}/ml/experiments/{get_mlflow_experiment_id()}/datasets',
-    monitoring_url=f'{databricks_host}/ml/experiments/{get_mlflow_experiment_id()}/evaluation-monitoring',
+    experiment_id=experiment_id,
+    link=f'{databricks_host}/ml/experiments/{experiment_id}?compareRunsMode=TRACES',
+    trace_url_template=f'{databricks_host}/ml/experiments/{experiment_id}/traces?selectedEvaluationId=',
+    session_url_template=f'{databricks_host}/ml/experiments/{experiment_id}/chat-sessions/{{sessionId}}?{session_query}',
+    failed_traces_url=f'{databricks_host}/ml/experiments/{experiment_id}/traces?&filter=TAG%3A%3A%3D%3A%3Ayes%3A%3Aeval_example&filter=ASSESSMENT%3A%3A%3D%3A%3Ano%3A%3Aaccuracy',
+    eval_dataset_url=f'{databricks_host}/ml/experiments/{experiment_id}/datasets',
+    monitoring_url=f'{databricks_host}/ml/experiments/{experiment_id}/evaluation-monitoring',
   )
 
 

@@ -218,11 +218,6 @@ async def submit_feedback(feedback: FeedbackRequest):
     return FeedbackResponse(success=False, message=str(e))
 
 
-# In-memory session storage for multi-turn conversations
-# Format: {session_id: [{"role": "user/assistant", "content": "..."}]}
-_conversation_sessions = {}
-
-
 @router.post('/multi-turn', response_model=MultiTurnResponse)
 async def multi_turn_conversation(request: MultiTurnRequest):
   """
@@ -230,70 +225,51 @@ async def multi_turn_conversation(request: MultiTurnRequest):
 
   This endpoint demonstrates MLflow's session tracking feature where multiple
   conversation turns are grouped together in a single session view.
+  The agent manages conversation history internally and sets session metadata
+  on MLflow traces so related turns are grouped together.
   """
   from mlflow_demo.agent import AGENT
-  import uuid
+  from mlflow.types.responses import Message, ResponsesAgentRequest
 
   try:
     # Set MLflow experiment
     mlflow.set_experiment(experiment_id=get_mlflow_experiment_id())
 
-    # Get or create session ID
-    session_id = request.session_id or str(uuid.uuid4())
-
-    # Get conversation history for this session
-    if session_id not in _conversation_sessions:
-      _conversation_sessions[session_id] = []
-
-    conversation_history = _conversation_sessions[session_id]
-
-    # Add the current question to history
-    conversation_history.append({'role': 'user', 'content': request.question})
-
-    # Build the full message list with history
-    messages = conversation_history.copy()
+    # Start a new session on first turn (clears agent history)
+    if request.is_first_turn:
+      session_id = AGENT.start_new_session(session_id=request.session_id)
+      logger.info(f'Started new conversation session: {session_id}')
+    else:
+      session_id = AGENT.get_current_session_id() or request.session_id
 
     logger.info(
-      f'Multi-turn request - Session: {session_id}, Turn: {len(conversation_history) // 2 + 1}'
+      f'Multi-turn request - Session: {session_id}, '
+      f'History: {len(AGENT.conversation_history)} messages'
     )
 
-    # Start MLflow session if this is the first turn
-    if request.is_first_turn:
-      # TODO: Fix session tracking - should be AGENT.start_new_session()
-      # mlflow.start_session(session_id=session_id)
-      logger.info(f'Started new conversation session: {session_id}')
+    # Build request with just the current question
+    # The agent's predict_stream merges conversation_history internally
+    agent_request = ResponsesAgentRequest(
+      input=[Message(role='user', content=request.question)]
+    )
 
-    # Generate response using the agent with full conversation context
+    # Call predict which handles session metadata and tracing
+    result = AGENT.predict(agent_request)
+
+    # Extract response text from result
     response_text = ''
-    trace_id = None
+    for item in result.output:
+      item_dict = item.model_dump() if hasattr(item, 'model_dump') else (item if isinstance(item, dict) else {})
+      if item_dict.get('type') == 'message' and item_dict.get('role') == 'assistant':
+        content = item_dict.get('content', [])
+        if isinstance(content, list) and len(content) > 0:
+          if isinstance(content[0], dict) and 'text' in content[0]:
+            response_text = content[0]['text']
 
-    logger.info('=' * 80)
-    logger.info(f'🚀 MULTI-TURN: Calling AGENT.predict_stream_local()')
-    logger.info(f'📝 Question: {request.question}')
-    logger.info(f'💬 Conversation history length: {len(messages)} messages')
-    logger.info('=' * 80)
+    # Get trace ID
+    trace_id = mlflow.get_last_active_trace_id()
 
-    for event in AGENT.predict_stream_local(request.question, conversation_history=messages):
-      event_type = event.get('type')
-
-      if event_type == 'token':
-        token = event.get('content', '')
-        response_text += token
-
-      elif event_type == 'done':
-        trace_id = event.get('trace_id')
-
-    # Add assistant response to history
-    conversation_history.append({'role': 'assistant', 'content': response_text})
-
-    # Update session storage
-    _conversation_sessions[session_id] = conversation_history
-
-    logger.info('=' * 80)
-    logger.info(f'✅ Multi-turn response complete')
-    logger.info(f'📊 Response length: {len(response_text)} chars')
-    logger.info(f'🔗 Trace ID: {trace_id}')
-    logger.info('=' * 80)
+    logger.info(f'Multi-turn response complete - {len(response_text)} chars, trace: {trace_id}')
 
     return MultiTurnResponse(
       response=response_text, session_id=session_id, trace_id=trace_id

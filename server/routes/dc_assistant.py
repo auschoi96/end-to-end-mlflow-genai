@@ -74,6 +74,9 @@ async def _generate_with_local_agent(question: str):
   trace_id = None
 
   try:
+    # Reset conversation history for single-turn requests
+    AGENT.start_new_session()
+
     # Set MLflow experiment for tracing
     mlflow.set_experiment(experiment_id=get_mlflow_experiment_id())
 

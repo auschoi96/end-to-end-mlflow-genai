@@ -4,6 +4,7 @@ import { CodeSnippet } from "@/components/code-snippet";
 import { CollapsibleSection } from "@/components/collapsible-section";
 import { MarkdownContent } from "@/components/markdown-content";
 import { DcTracingDemo } from "@/components/dc-assistant/DcTracingDemo";
+import { MultiToolDemo } from "@/components/dc-assistant/MultiToolDemo";
 import { MultiTurnDemo } from "@/components/dc-assistant/MultiTurnDemo";
 import { Button } from "@/components/ui/button";
 import { ExternalLink } from "lucide-react";
@@ -23,15 +24,6 @@ const introContent = `
 - **Accountability**: Maintain complete audit trail of agent decisions and data sources
 
 When a coach asks "What do the Cowboys do on 3rd and 6?", the DC Assistant makes multiple decisions: which Unity Catalog functions to call, what parameters to use, how to interpret the results. **MLflow Tracing automatically captures all of this**, creating a detailed execution graph that serves as the input for evaluation and feedback collection.
-
-## Trace Structure
-
-Each trace includes:
-- **RETRIEVER spans**: Unity Catalog tool calls with exact SQL parameters and query results
-- **PARSER spans**: Data processing, aggregation, and formatting steps
-- **LLM spans**: Model calls for reasoning, interpretation, and synthesis
-- **Trace ID**: Unique identifier linking coaching feedback to specific analyses
-- **Timestamps**: Latency tracking for each operation to identify performance bottlenecks
 
 **Without tracing, you're flying blind.** Tracing is the prerequisite for everything that follows: evaluation, labeling, judge alignment, and prompt optimization.
 `;
@@ -355,13 +347,13 @@ The diff below shows how to add advanced tracing features:`}
         </div>
       </div>
 
-      {/* Step 2: Try Interactive Demo */}
+      {/* Step 2: Try Interactive Demo - Single Question */}
       <div className="space-y-4">
         <div className="flex items-center gap-3">
           <div className="flex items-center justify-center w-8 h-8 bg-green-100 text-green-600 rounded-full font-semibold text-sm">
             2
           </div>
-          <h3 className="text-lg font-semibold">Try the interactive demo</h3>
+          <h3 className="text-lg font-semibold">Try the interactive demo - Single question</h3>
         </div>
 
         <div className="ml-11 space-y-4">
@@ -374,11 +366,33 @@ The diff below shows how to add advanced tracing features:`}
         </div>
       </div>
 
-      {/* Step 3: Multi-Turn Conversations */}
+      {/* Step 3: Multi-Tool Questions */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center w-8 h-8 bg-orange-100 text-orange-600 rounded-full font-semibold text-sm">
+            3
+          </div>
+          <h3 className="text-lg font-semibold">
+            Multi-tool questions
+          </h3>
+        </div>
+
+        <div className="ml-11 space-y-4">
+          <p className="text-muted-foreground">
+            Some coaching questions require combining data from multiple sources. Watch how the
+            agent orchestrates multiple Unity Catalog function calls to build comprehensive answers,
+            and see how MLflow traces capture the entire execution flow.
+          </p>
+
+          <MultiToolDemo />
+        </div>
+      </div>
+
+      {/* Step 4: Multi-Turn Conversations */}
       <div className="space-y-4">
         <div className="flex items-center gap-3">
           <div className="flex items-center justify-center w-8 h-8 bg-purple-100 text-purple-600 rounded-full font-semibold text-sm">
-            3
+            4
           </div>
           <h3 className="text-lg font-semibold">
             Explore multi-turn conversations with session tracking
@@ -389,7 +403,7 @@ The diff below shows how to add advanced tracing features:`}
           <p className="text-muted-foreground">
             Real coaching conversations aren't single questions—they involve follow-ups that
             build on previous context. See how MLflow groups related turns together in a
-            single session trace, making it easy to understand and debug conversational AI.
+            single session trace, making it easy to understand and debug conversational flows.
           </p>
 
           <MultiTurnDemo />

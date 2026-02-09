@@ -277,12 +277,12 @@ export function MultiTurnDemo() {
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Running Turn {currentTurn + 1}/{getConversationFlow().length}...
+                  Asking DC Assistant (Turn {currentTurn + 1}/{getConversationFlow().length})...
                 </>
               ) : (
                 <>
                   <Send className="mr-2 h-4 w-4" />
-                  Run Multi-Turn Demo
+                  Ask DC Assistant
                 </>
               )}
             </Button>

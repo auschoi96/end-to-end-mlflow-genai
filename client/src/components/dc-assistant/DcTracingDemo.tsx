@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, Send, ExternalLink, CheckCircle2, ThumbsUp, ThumbsDown } from "lucide-react";
+import { Loader2, Send, ExternalLink, CheckCircle2, ThumbsUp, ThumbsDown, Wrench } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -14,6 +14,12 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+
+// Strip catalog.schema prefix from tool names for cleaner display
+const formatToolName = (name: string) => {
+  const parts = name.split("__");
+  return parts.length > 2 ? parts.slice(2).join("__") : name;
+};
 
 // NFL Teams
 const NFL_TEAMS = [
@@ -27,7 +33,7 @@ const NFL_TEAMS = [
   "Seattle Seahawks", "Tampa Bay Buccaneers", "Tennessee Titans", "Washington Commanders"
 ];
 
-// Analysis types with their specific parameters
+// Analysis types with their specific parameters (matching actual UC functions)
 const ANALYSIS_TYPES = [
   {
     id: "3rd-down",
@@ -37,18 +43,18 @@ const ANALYSIS_TYPES = [
     options: { distance: ["short", "medium", "long"] }
   },
   {
-    id: "red-zone",
-    label: "Red Zone Tendencies",
-    tool: "red_zone_tendencies",
-    parameters: ["zone"],
-    options: { zone: ["inside_20", "inside_10", "goal_to_go"] }
+    id: "formation",
+    label: "Offense Formation Tendencies",
+    tool: "tendencies_by_offense_formation",
+    parameters: [],
+    options: {}
   },
   {
-    id: "personnel",
-    label: "Personnel Packages",
-    tool: "tendencies_by_personnel",
-    parameters: ["package"],
-    options: { package: ["11", "12", "21", "10", "13"] }
+    id: "drive-start",
+    label: "Drive Start Tendencies",
+    tool: "tendencies_by_drive_start",
+    parameters: [],
+    options: {}
   },
   {
     id: "pass-rush",
@@ -58,11 +64,11 @@ const ANALYSIS_TYPES = [
     options: {}
   },
   {
-    id: "target-dist",
-    label: "Target Distribution",
-    tool: "target_share_by_down",
-    parameters: ["down"],
-    options: { down: ["1st", "2nd", "3rd", "any"] }
+    id: "two-minute",
+    label: "Two Minute Drill",
+    tool: "tendencies_two_minute_drill",
+    parameters: [],
+    options: {}
   },
   {
     id: "screen-plays",
@@ -84,7 +90,21 @@ interface DcTracingDemoProps {
   onTraceGenerated?: (traceId: string) => void;
 }
 
+const QUICK_SELECT_QUESTIONS = [
+  {
+    id: "patriots-blitz",
+    label: "Patriots vs the Blitz",
+    question: "How do the Patriots attack the blitz?",
+  },
+  {
+    id: "titans-3rd-long",
+    label: "Titans on 3rd and Long",
+    question: "What do the 2024 Titans do on 3rd and long?",
+  },
+];
+
 export function DcTracingDemo({ onTraceGenerated }: DcTracingDemoProps = {}) {
+  const [quickSelect, setQuickSelect] = useState("");
   const [selectedTeam, setSelectedTeam] = useState("");
   const [selectedSeasons, setSelectedSeasons] = useState<string[]>(["2024"]);
   const [selectedAnalysisType, setSelectedAnalysisType] = useState("");
@@ -134,20 +154,14 @@ export function DcTracingDemo({ onTraceGenerated }: DcTracingDemoProps = {}) {
       case "3rd-down":
         const distance = parameters.distance || "medium";
         return `What do the ${selectedTeam} do on 3rd and ${distance} ${seasonText}?`;
-      case "red-zone":
-        const zone = parameters.zone || "inside_20";
-        const zoneText = zone === "inside_20" ? "inside the 20"
-          : zone === "inside_10" ? "inside the 10"
-          : "on goal-to-go";
-        return `What are the ${selectedTeam}'s tendencies ${zoneText} ${seasonText}?`;
-      case "personnel":
-        const pkg = parameters.package || "11";
-        return `What does the ${selectedTeam}'s ${pkg} personnel package look like ${seasonText}?`;
+      case "formation":
+        return `What are the ${selectedTeam}'s most common offensive formations ${seasonText}?`;
+      case "drive-start":
+        return `What are the ${selectedTeam}'s tendencies at the start of drives ${seasonText}?`;
       case "pass-rush":
-        return `How do the ${selectedTeam} attack the blitz ${seasonText}?`;
-      case "target-dist":
-        const down = parameters.down || "3rd";
-        return `Who gets the ball for the ${selectedTeam} on ${down} down ${seasonText}?`;
+        return `How do the ${selectedTeam} perform against the pass rush ${seasonText}?`;
+      case "two-minute":
+        return `What do the ${selectedTeam} do in two minute drill situations ${seasonText}?`;
       case "screen-plays":
         return `What are the ${selectedTeam}'s screen play tendencies ${seasonText}?`;
       default:
@@ -158,8 +172,11 @@ export function DcTracingDemo({ onTraceGenerated }: DcTracingDemoProps = {}) {
   const questionText = generateQuestionText();
 
   const handleAnalyze = async () => {
-    if (!selectedTeam || !selectedAnalysisType) {
-      setError("Please select a team and analysis type");
+    const quickSelectData = QUICK_SELECT_QUESTIONS.find(q => q.id === quickSelect);
+    const activeQuestion = quickSelectData ? quickSelectData.question : questionText;
+
+    if (!quickSelect && (!selectedTeam || !selectedAnalysisType)) {
+      setError("Please select a quick question or configure one below");
       return;
     }
 
@@ -174,7 +191,7 @@ export function DcTracingDemo({ onTraceGenerated }: DcTracingDemoProps = {}) {
     setFeedbackSubmitted(false);
 
     const requestData = {
-      question: questionText  // Use the generated question text
+      question: activeQuestion
     };
 
     try {
@@ -214,9 +231,12 @@ export function DcTracingDemo({ onTraceGenerated }: DcTracingDemoProps = {}) {
                 accumulatedContent += data.content;
                 setStreamingContent(accumulatedContent);
               } else if (data.type === "tool_call") {
+                // Clear accumulated filler text when a new tool call arrives
+                accumulatedContent = "";
+                setStreamingContent("");
                 // Add tool call to the list
                 const toolCall: ToolCall = {
-                  tool: data.tool.function_name || "Unknown",
+                  tool: data.tool.name || data.tool.function_name || "Unknown",
                   arguments: data.tool.arguments ? JSON.parse(data.tool.arguments) : {},
                   status: "success"
                 };
@@ -228,7 +248,7 @@ export function DcTracingDemo({ onTraceGenerated }: DcTracingDemoProps = {}) {
                 // Process any tool calls from the done event
                 if (data.tool_calls && Array.isArray(data.tool_calls)) {
                   const calls = data.tool_calls.map((tc: any) => ({
-                    tool: tc.function_name || "Unknown",
+                    tool: tc.name || tc.function_name || "Unknown",
                     arguments: tc.arguments ? JSON.parse(tc.arguments) : {},
                     status: "success" as const
                   }));
@@ -286,17 +306,76 @@ export function DcTracingDemo({ onTraceGenerated }: DcTracingDemoProps = {}) {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {/* Left Panel - Question Configuration */}
+      {/* Left Panel - Quick Select + Question Configuration */}
       <div className="space-y-4">
         <Card>
-          <CardHeader>
-            <CardTitle>Question Configuration</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="pt-6 space-y-4">
+            {/* Quick Select */}
+            <div className="space-y-2">
+              <Label htmlFor="quick-select" className="font-semibold">Quick Select</Label>
+              <Select value={quickSelect} onValueChange={(val) => {
+                setQuickSelect(val);
+                // Clear manual config when quick select is chosen
+                setSelectedTeam("");
+                setSelectedAnalysisType("");
+                setParameters({});
+              }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pick a pre-built question..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {QUICK_SELECT_QUESTIONS.map((q) => (
+                    <SelectItem key={q.id} value={q.id}>
+                      {q.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Show selected quick question */}
+            {quickSelect && (
+              <div className="p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">
+                <Label className="text-xs text-blue-600 dark:text-blue-400 font-semibold mb-2 block">
+                  Question to Agent
+                </Label>
+                <p className="text-sm text-blue-900 dark:text-blue-100 italic">
+                  "{QUICK_SELECT_QUESTIONS.find(q => q.id === quickSelect)?.question}"
+                </p>
+              </div>
+            )}
+
+            <Button
+              onClick={handleAnalyze}
+              disabled={loading || (!quickSelect && (!selectedTeam || !selectedAnalysisType))}
+              className="w-full"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Asking DC Assistant...
+                </>
+              ) : (
+                <>
+                  <Send className="mr-2 h-4 w-4" />
+                  Ask DC Assistant
+                </>
+              )}
+            </Button>
+
+            <div className="relative py-2">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground">or configure your own</span>
+              </div>
+            </div>
+
             {/* Team Selector */}
             <div className="space-y-2">
               <Label htmlFor="team">Team</Label>
-              <Select value={selectedTeam} onValueChange={setSelectedTeam}>
+              <Select value={selectedTeam} onValueChange={(val) => { setSelectedTeam(val); setQuickSelect(""); }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select NFL team..." />
                 </SelectTrigger>
@@ -346,7 +425,7 @@ export function DcTracingDemo({ onTraceGenerated }: DcTracingDemoProps = {}) {
             {/* Analysis Type */}
             <div className="space-y-2">
               <Label htmlFor="analysis-type">Analysis Type</Label>
-              <Select value={selectedAnalysisType} onValueChange={handleAnalysisTypeChange}>
+              <Select value={selectedAnalysisType} onValueChange={(val) => { handleAnalysisTypeChange(val); setQuickSelect(""); }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select analysis type..." />
                 </SelectTrigger>
@@ -358,11 +437,6 @@ export function DcTracingDemo({ onTraceGenerated }: DcTracingDemoProps = {}) {
                   ))}
                 </SelectContent>
               </Select>
-              {selectedAnalysis && (
-                <p className="text-xs text-muted-foreground">
-                  UC Tool: <code className="bg-muted px-1 py-0.5 rounded">{selectedAnalysis.tool}</code>
-                </p>
-              )}
             </div>
 
             {/* Dynamic Parameters */}
@@ -389,33 +463,35 @@ export function DcTracingDemo({ onTraceGenerated }: DcTracingDemoProps = {}) {
 
             {/* Generated Question Display */}
             {selectedTeam && selectedAnalysisType && (
-              <div className="p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">
-                <Label className="text-xs text-blue-600 dark:text-blue-400 font-semibold mb-2 block">
-                  Question to Agent
-                </Label>
-                <p className="text-sm text-blue-900 dark:text-blue-100 italic">
-                  "{questionText}"
-                </p>
-              </div>
-            )}
+              <>
+                <div className="p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <Label className="text-xs text-blue-600 dark:text-blue-400 font-semibold mb-2 block">
+                    Question to Agent
+                  </Label>
+                  <p className="text-sm text-blue-900 dark:text-blue-100 italic">
+                    "{questionText}"
+                  </p>
+                </div>
 
-            <Button
-              onClick={handleAnalyze}
-              disabled={loading || !selectedTeam || !selectedAnalysisType}
-              className="w-full"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Analyzing...
-                </>
-              ) : (
-                <>
-                  <Send className="mr-2 h-4 w-4" />
-                  Analyze
-                </>
-              )}
-            </Button>
+                <Button
+                  onClick={handleAnalyze}
+                  disabled={loading}
+                  className="w-full"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Asking DC Assistant...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="mr-2 h-4 w-4" />
+                      Ask DC Assistant
+                    </>
+                  )}
+                </Button>
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -434,32 +510,23 @@ export function DcTracingDemo({ onTraceGenerated }: DcTracingDemoProps = {}) {
           </CardHeader>
           <CardContent>
             {toolCalls.length > 0 && (
-              <div className="mb-4 p-3 bg-muted/50 rounded-lg space-y-2">
-                <p className="text-xs font-semibold text-muted-foreground mb-2">Tool Calls</p>
-                {toolCalls.map((call, idx) => (
-                  <div key={idx} className="flex items-start gap-2 text-sm">
-                    <CheckCircle2 className={`h-4 w-4 mt-0.5 ${
-                      call.status === "success" ? "text-green-600" :
-                      call.status === "error" ? "text-red-600" :
-                      "text-yellow-600 animate-pulse"
-                    }`} />
-                    <div className="flex-1">
-                      <code className="text-xs bg-background px-1.5 py-0.5 rounded">
-                        {call.tool}
+              <div className="mb-4">
+                <p className="text-xs font-semibold text-muted-foreground mb-2">Tools used by DC Assistant:</p>
+                <div className="flex flex-wrap gap-2">
+                  {toolCalls.filter((call, idx, arr) => arr.findIndex(c => formatToolName(c.tool) === formatToolName(call.tool)) === idx).map((call, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-full">
+                      <Wrench className="h-3 w-3 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                      <code className="text-xs font-medium text-amber-800 dark:text-amber-200">
+                        {formatToolName(call.tool)}
                       </code>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {Object.entries(call.arguments).map(([k, v]) => (
-                          <div key={k}>
-                            {k}: {Array.isArray(v) ? `[${v.join(", ")}]` : JSON.stringify(v)}
-                          </div>
-                        ))}
-                      </div>
+                      <CheckCircle2 className={`h-3 w-3 flex-shrink-0 ${
+                        call.status === "success" ? "text-green-600" :
+                        call.status === "error" ? "text-red-600" :
+                        "text-amber-600 animate-pulse"
+                      }`} />
                     </div>
-                    <Badge variant={call.status === "success" ? "default" : "secondary"}>
-                      {call.status}
-                    </Badge>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
 

@@ -49,11 +49,6 @@ export function EvaluationBuilder() {
       enabled: true,
     },
     {
-      name: "ConversationalSafety",
-      description: "Does the conversation maintain safe and appropriate tone throughout?",
-      enabled: true,
-    },
-    {
       name: "ToolCallCorrectness",
       description: "Are the tool calls and arguments correct for the user query?",
       enabled: true,
@@ -549,11 +544,12 @@ export function EvaluationBuilder() {
         {/* Run Evaluation Summary & Buttons */}
         <Card>
           <CardContent className="pt-6 space-y-4">
+            <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded px-3 py-2">
+              Running evaluations live will take a few minutes. For demos, we recommend using the pre-run results below.
+            </p>
+
             <div>
               <p className="font-semibold text-sm">
-                {isEvalRunning ? "Evaluation in progress..." : evalHasRun ? "Evaluation complete" : "Ready to evaluate"}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
                 {totalScorers} scorer{totalScorers !== 1 ? "s" : ""} selected: {activeBuiltinJudges.map(j => j.name).concat(activeGuidelines.map(g => g.name)).join(", ")}
               </p>
             </div>
@@ -568,14 +564,35 @@ export function EvaluationBuilder() {
               </div>
             )}
 
+            {/* Completion state */}
+            {evalHasRun && !isEvalRunning && (
+              <div className="flex items-center gap-2 text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded px-3 py-2">
+                <CheckCircle2 className="h-4 w-4" />
+                <span className="text-sm font-medium">Evaluation complete!</span>
+              </div>
+            )}
+
             {evalError && (
               <p className="text-sm text-red-600">{evalError}</p>
             )}
 
             <div className="flex gap-4">
               <Button
+                variant="open_mlflow_ui"
                 size="lg"
-                disabled={totalScorers === 0 || isEvalRunning}
+                onClick={() =>
+                  evaluationRunsUrl &&
+                  window.open(evaluationRunsUrl, "_blank")
+                }
+                disabled={isExperimentLoading || !evaluationRunsUrl}
+              >
+                <ExternalLink className="h-4 w-4 mr-2" />
+                View Pre-run Results
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                disabled={totalScorers === 0 || isEvalRunning || evalHasRun}
                 onClick={runEvaluation}
               >
                 {isEvalRunning ? (
@@ -586,26 +603,14 @@ export function EvaluationBuilder() {
                 ) : evalHasRun ? (
                   <>
                     <CheckCircle2 className="h-4 w-4 mr-2" />
-                    Run Again
+                    Evaluation Complete
                   </>
                 ) : (
                   <>
                     <Play className="h-4 w-4 mr-2" />
-                    Run Evaluation ({totalScorers} scorers)
+                    Run Evaluation Live ({totalScorers} scorers)
                   </>
                 )}
-              </Button>
-              <Button
-                variant="open_mlflow_ui"
-                size="lg"
-                onClick={() =>
-                  evaluationRunsUrl &&
-                  window.open(evaluationRunsUrl, "_blank")
-                }
-                disabled={isExperimentLoading || !evaluationRunsUrl || isEvalRunning}
-              >
-                <ExternalLink className="h-4 w-4 mr-2" />
-                View Results
               </Button>
             </div>
           </CardContent>

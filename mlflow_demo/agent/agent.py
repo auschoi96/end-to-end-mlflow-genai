@@ -5,7 +5,6 @@ from typing import Any, Callable, Generator, Optional
 from uuid import uuid4
 import warnings
 
-import backoff
 import mlflow
 import openai
 from databricks.sdk import WorkspaceClient

@@ -58,7 +58,6 @@ async def run_evaluation(request: RunEvalRequest):
       builtin_map = {
         'RelevanceToQuery': mlflow_scorers.RelevanceToQuery,
         'Safety': mlflow_scorers.Safety,
-        'ConversationalSafety': mlflow_scorers.ConversationalSafety,
         'ToolCallCorrectness': mlflow_scorers.ToolCallCorrectness,
         'ToolCallEfficiency': mlflow_scorers.ToolCallEfficiency,
       }

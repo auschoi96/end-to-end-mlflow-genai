@@ -17,15 +17,15 @@ Evaluation is how you systematically measure agent quality so you can improve it
 
 ### 1. Built-in Judges
 Research-backed judges from Databricks that evaluate common quality dimensions out of the box. No configuration needed.
-- *Example: **ConversationToolCallEfficiency** checks whether the DC Assistant called the right Unity Catalog functions without redundant calls*
+- Example: **ToolCallEfficiency** checks whether the DC Assistant called the right Unity Catalog functions without redundant calls
 
 ### 2. Custom Guidelines Judges
 LLM judges that you configure with domain-specific rules. These are written in natural language by subject matter experts (like coaching staff) and scale their expertise to every evaluation.
-- *Example: **Football Language** judge checks that the response uses correct NFL terminology—formations, personnel packages, coverage schemes—the way a real coaching staff would*
+- Example: **Football Language** judge checks that the response uses correct NFL terminology—formations, personnel packages, coverage schemes—the way a real coaching staff would
 
 ### 3. Code-Based Scorers
 Deterministic, programmatic checks for things that don't need an LLM to evaluate. These are fast, cheap, and always consistent.
-- *Example: Assert the response is under 10 sentences, or that the response contains the team name from the question*
+- Example: **ResponseLengthChecker** asserts the response is under 10 sentences to keep answers concise
 
 The same scorers can be used to both **evaluate quality in development** and **monitor quality in production**.
 `;
@@ -64,7 +64,6 @@ import mlflow.genai
 from mlflow.genai.scorers import (
     RelevanceToQuery,
     Safety,
-    ConversationalSafety,
     ToolCallCorrectness,
     ToolCallEfficiency,
 )
@@ -74,7 +73,6 @@ from datetime import datetime
 builtin_scorers = [
     RelevanceToQuery(),
     Safety(),
-    ConversationalSafety(),
     ToolCallCorrectness(),
     ToolCallEfficiency(),
 ]
@@ -169,36 +167,24 @@ from mlflow.entities import Feedback, Trace
 from mlflow.genai.scorers import scorer
 
 @scorer
-def tool_call_efficiency(trace: Trace) -> Feedback:
-    """Evaluate how effectively the app uses tools"""
-    # Retrieve all tool call spans from the trace
-    tool_calls = trace.search_spans(span_type="TOOL")
+def response_length_checker(trace: Trace) -> Feedback:
+    """Assert the response is under 10 sentences"""
+    response = trace.data.response
+    if not response:
+        return Feedback(value=None, rationale="No response to evaluate")
 
-    if not tool_calls:
-        return Feedback(
-            value=None,
-            rationale="No tool usage to evaluate"
-        )
+    sentences = [s.strip() for s in response.split(".") if s.strip()]
+    count = len(sentences)
 
-    # Check for redundant calls
-    tool_names = [span.name for span in tool_calls]
-    if len(tool_names) != len(set(tool_names)):
+    if count > 10:
         return Feedback(
             value=False,
-            rationale=f"Redundant tool calls detected: {tool_names}"
-        )
-
-    # Check for errors
-    failed_calls = [s for s in tool_calls if s.status.status_code != "OK"]
-    if failed_calls:
-        return Feedback(
-            value=False,
-            rationale=f"{len(failed_calls)} tool calls failed"
+            rationale=f"Response has {count} sentences (max 10)"
         )
 
     return Feedback(
         value=True,
-        rationale=f"Efficient tool usage: {len(tool_calls)} successful calls"
+        rationale=f"Response has {count} sentences (within limit)"
     )
 
 # Run eval on the last 5 production traces
@@ -206,8 +192,7 @@ traces = mlflow.search_traces(max_results=5, order_by=['attributes.timestamp_ms 
 
 mlflow.genai.evaluate(
     data=traces,
-    # your application's prediction function
-    predict_fn=email_generation_app,
-    scorers=[tool_call_efficiency],
+    predict_fn=predict_fn,
+    scorers=[response_length_checker],
 )
 `;

@@ -14,7 +14,7 @@ const introContent = `
 
 ## Why Ground Truth Labels Matter
 
-As highlighted in the [Databricks blog on self-optimizing football chatbots](https://www.databricks.com/blog/self-optimizing-football-chatbot-guided-domain-experts-databricks), **the key to high-quality GenAI applications is curating a verified evaluation dataset through domain expert feedback**.
+**The key to high-quality GenAI applications is curating a verified evaluation dataset through domain expert feedback.**
 
 You've created baseline LLM judges, but how do you know they're aligned with actual coaching expertise? App developers typically aren't domain experts in NFL defensive strategy, so **collecting structured feedback from SMEs (coaching staff) is critical** for two reasons:
 
@@ -29,26 +29,14 @@ Without this systematic feedback collection, you're left with ad-hoc quality ass
 
 ### What MLflow Labeling Sessions Provide:
 
-1. **Built-in Review App UI** - A polished, non-technical interface designed specifically for SMEs to review GenAI traces—**no Databricks workspace access required**, just share a URL
-2. **Structured Feedback Collection** - Define exactly what you want to measure (yes/no, ratings, categorical choices, free-text) with customizable schemas aligned to your quality dimensions
-3. **Automatic Data Integration** - Labels flow directly into MLflow, linked to the original traces—immediately available for analysis and judge optimization
-4. **Scalable Methodology** - Assign reviewers, track progress, manage multiple labeling sessions—this is built for enterprise-scale feedback collection, not one-off experiments
-5. **Seamless Workflow** - From trace creation → labeling session → expert review → judge alignment, the entire loop is integrated in one platform
+1. **Structured Feedback Collection** - Define exactly what you want to measure (yes/no, ratings, categorical choices, free-text) with customizable schemas aligned to your quality dimensions
+2. **Built-in Review App UI** - A polished, non-technical interface designed specifically for SMEs to review GenAI traces—**no Databricks workspace access required**, just share a URL. Labels flow directly into MLflow, linked to the original traces and immediately available for analysis and judge optimization.
 
 This creates a **continuous improvement cycle**: **Traces → Labeling Sessions → Expert Review → Judge Alignment → Prompt Optimization → Improved Quality**
 
 ### The Self-Optimizing Architecture
 
-This SME labeling step is the critical foundation of the self-optimizing system. Here's how it fits into the bigger picture:
-
-- **Build phase**: You create your agent, define quality metrics, and deploy initial judges
-- **Optimize phase** (this step): SMEs review agent outputs through the managed UI, providing the ground truth labels that will:
-  - Validate that your judges measure what coaching staff actually care about
-  - Create a verified dataset for judge alignment in the next step
-  - Enable automatic prompt optimization guided by expert preferences
-  - Feed back into the system for continuous quality improvement
-
-**Without systematic SME feedback collection, you can't optimize**. MLflow makes this the easiest part of the workflow.
+This SME labeling step enables the self-optimizing system. Expert labels validate your judges, create verified datasets for judge alignment, and enable automatic prompt optimization—**without systematic SME feedback collection, you can't optimize**. MLflow makes this seamless.
 
 <div style="text-align: center; margin: 30px 0;">
   <img src="/sme-labeling-optimize.png" alt="SME Labeling in the Optimize Loop" style="max-width: 700px; width: 100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);" />

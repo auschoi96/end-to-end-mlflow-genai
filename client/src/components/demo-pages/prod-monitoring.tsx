@@ -191,38 +191,75 @@ export function MonitoringDemo() {
   const [currentIteration, setCurrentIteration] = React.useState(0);
   const [viewMode, setViewMode] = React.useState<"side-by-side" | "diff">("side-by-side");
 
-  const runOptimization = () => {
+  const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
+  const [progressMessage, setProgressMessage] = React.useState<string>("");
+  const [doneInfo, setDoneInfo] = React.useState<{
+    prompt_name?: string;
+    new_version?: string;
+    baseline_score?: number | null;
+    best_score?: number | null;
+  } | null>(null);
+
+  const runOptimization = async () => {
     setIsOptimizing(true);
     setHasOptimized(false);
     setOptimizationProgress(0);
     setCurrentIteration(0);
+    setErrorMsg(null);
+    setProgressMessage("Starting...");
+    setDoneInfo(null);
 
-    // Simulate GEPA optimization progress
-    let iteration = 0;
-    const progressInterval = setInterval(() => {
-      setOptimizationProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(progressInterval);
-          return 100;
-        }
-        return prev + 5;
+    try {
+      const response = await fetch("/api/optimization/optimize-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
       });
 
-      // Update iteration every 20%
-      if (optimizationProgress % 20 === 0 && iteration < 5) {
-        iteration += 1;
-        setCurrentIteration(iteration);
-      }
-    }, 400);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-    // Complete after ~8 seconds
-    setTimeout(() => {
-      clearInterval(progressInterval);
-      setOptimizationProgress(100);
-      setCurrentIteration(5);
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error("No response body");
+
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === "progress") {
+              if (typeof data.percent === "number") setOptimizationProgress(data.percent);
+              if (data.message) setProgressMessage(data.message);
+            } else if (data.type === "done") {
+              setOptimizationProgress(100);
+              setProgressMessage("Optimization complete");
+              setDoneInfo({
+                prompt_name: data.prompt_name,
+                new_version: data.new_version,
+                baseline_score: data.baseline_score,
+                best_score: data.best_score,
+              });
+              setHasOptimized(true);
+              setIsOptimizing(false);
+            } else if (data.type === "error") {
+              setErrorMsg(data.error);
+              setIsOptimizing(false);
+            }
+          } catch (e) {
+            console.error("SSE parse error:", e);
+          }
+        }
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || "Optimization failed");
       setIsOptimizing(false);
-      setHasOptimized(true);
-    }, 8000);
+    }
   };
 
   const introSection = <MarkdownContent content={introContent} />;
@@ -293,7 +330,7 @@ export function MonitoringDemo() {
             {isOptimizing ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Running GEPA Optimization... (Iteration {currentIteration}/5)
+                Running GEPA Optimization...
               </>
             ) : hasOptimized ? (
               <>
@@ -313,11 +350,23 @@ export function MonitoringDemo() {
               <Progress value={optimizationProgress} className="w-full" />
               <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-2">
                 <Activity className="h-3 w-3 animate-pulse" />
-                {optimizationProgress < 30 && "Generating candidate prompts..."}
-                {optimizationProgress >= 30 && optimizationProgress < 70 && "Testing candidates with aligned judges..."}
-                {optimizationProgress >= 70 && optimizationProgress < 100 && "Refining top performers..."}
-                {optimizationProgress === 100 && "Selecting best prompt!"}
+                {progressMessage || "Running..."}
               </p>
+            </div>
+          )}
+
+          {errorMsg && (
+            <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200">
+              <span className="font-medium">Error:</span> {errorMsg}
+            </div>
+          )}
+
+          {doneInfo && doneInfo.new_version && (
+            <div className="rounded border border-green-300 bg-green-50 p-3 text-sm dark:border-green-800 dark:bg-green-950/30">
+              Saved <code className="font-mono">{doneInfo.prompt_name}</code> v{doneInfo.new_version}
+              {doneInfo.baseline_score != null && doneInfo.best_score != null && (
+                <span> — baseline {Number(doneInfo.baseline_score).toFixed(3)} → best {Number(doneInfo.best_score).toFixed(3)}</span>
+              )}
             </div>
           )}
         </CardContent>

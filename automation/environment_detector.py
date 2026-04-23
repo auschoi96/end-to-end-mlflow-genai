@@ -262,7 +262,7 @@ class EnvironmentDetector:
 
     suggestions = {
       'app_name': app_name,
-      'prompt_name': 'email_generation',  # Fixed name from existing setup
+      'prompt_name': 'dc_assistant_system_prompt',  # NFL DC assistant prompt
       'prompt_alias': 'production',  # Fixed alias from existing setup
     }
 
@@ -357,7 +357,7 @@ class EnvironmentDetector:
     config = {
       # Fixed values from existing setup
       'MLFLOW_ENABLE_ASYNC_TRACE_LOGGING': 'false',
-      'PROMPT_NAME': 'email_generation',
+      'PROMPT_NAME': 'dc_assistant_system_prompt',
       'PROMPT_ALIAS': 'production',
       'MLFLOW_TRACKING_URI': 'databricks',
     }
@@ -372,5 +372,11 @@ class EnvironmentDetector:
     # Set default LLM model if not provided
     if 'LLM_MODEL' not in config:
       config['LLM_MODEL'] = 'databricks-claude-3-7-sonnet'
+
+    # Derive MLFLOW_TRACING_DESTINATION from UC_CATALOG and UC_SCHEMA
+    uc_catalog = config.get('UC_CATALOG')
+    uc_schema = config.get('UC_SCHEMA')
+    if uc_catalog and uc_schema:
+      config['MLFLOW_TRACING_DESTINATION'] = f'{uc_catalog}.{uc_schema}'
 
     return config

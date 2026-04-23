@@ -142,13 +142,13 @@ fi
 
 if [ -n "$SAMPLE_LABELING_TRACE_ID" ]; then
   echo "🔧 Setting SAMPLE_LABELING_TRACE_ID to $SAMPLE_LABELING_TRACE_ID in app.yaml..."
-  sed -i.bak "s/value: 'placeholder-sample-labeling-trace-id'/value: '$SAMPLE_LABELING_TRACE_ID'/" app.yaml
+  sed -i.bak "s|value: 'placeholder-sample-labeling-trace-id'|value: '$SAMPLE_LABELING_TRACE_ID'|" app.yaml
   rm -f app.yaml.bak
 fi
 
 if [ -n "$SAMPLE_TRACE_ID" ]; then
   echo "🔧 Setting SAMPLE_TRACE_ID to $SAMPLE_TRACE_ID in app.yaml..."
-  sed -i.bak "s/value: 'placeholder-sample-trace-id'/value: '$SAMPLE_TRACE_ID'/" app.yaml
+  sed -i.bak "s|value: 'placeholder-sample-trace-id'|value: '$SAMPLE_TRACE_ID'|" app.yaml
   rm -f app.yaml.bak
 fi
 
@@ -236,6 +236,13 @@ if [ "$SYNC_ONLY" = true ]; then
   echo "✅ Notebooks synced to workspace: $LHA_SOURCE_CODE_PATH"
   echo ""
   exit 0
+fi
+
+# Ensure the app exists before deploying (create if missing)
+if ! databricks apps get "$DATABRICKS_APP_NAME" --profile "$DATABRICKS_CONFIG_PROFILE" &>/dev/null; then
+  echo "📱 App '$DATABRICKS_APP_NAME' not found — creating it..."
+  databricks apps create "$DATABRICKS_APP_NAME" --no-compute --no-wait --profile "$DATABRICKS_CONFIG_PROFILE"
+  echo "✅ App created"
 fi
 
 databricks apps deploy $DATABRICKS_APP_NAME \

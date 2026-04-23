@@ -367,22 +367,20 @@ class AutoSetup:
       f'Available catalogs (showing {len(available_catalogs)} with VERIFIED '
       f'CREATE SCHEMA permissions):'
     )
-    catalog_list = list(available_catalogs.keys())
 
-    # Show suggested catalog first if it exists
+    # Build ordered display list: suggested first, then others
+    display_catalogs = []
     if suggested_catalog and suggested_catalog in available_catalogs:
-      print(f'   0. {suggested_catalog} (suggested) - {available_catalogs[suggested_catalog]}')
-      start_idx = 1
-    else:
-      start_idx = 0
-
-    # Show other catalogs
-    for i, (catalog_name, access_level) in enumerate(available_catalogs.items()):
+      display_catalogs.append(suggested_catalog)
+    for catalog_name in available_catalogs:
       if catalog_name != suggested_catalog:
-        print(f'   {start_idx + i}. {catalog_name} - {access_level}')
+        display_catalogs.append(catalog_name)
 
-    # Add option to manually enter catalog name
-    manual_entry_idx = len(catalog_list) + (1 if suggested_catalog in available_catalogs else 0)
+    for i, catalog_name in enumerate(display_catalogs):
+      suffix = ' (suggested)' if catalog_name == suggested_catalog else ''
+      print(f'   {i}. {catalog_name}{suffix} - {available_catalogs[catalog_name]}')
+
+    manual_entry_idx = len(display_catalogs)
     print(f'   {manual_entry_idx}. Enter catalog name manually')
 
     max_choice = manual_entry_idx
@@ -394,15 +392,8 @@ class AutoSetup:
         # Check if it's a number
         try:
           choice_num = int(choice)
-          if choice_num == 0 and suggested_catalog and suggested_catalog in available_catalogs:
-            return suggested_catalog
-          elif 1 <= choice_num <= len(catalog_list):
-            # Adjust index based on whether suggested catalog is shown
-            if suggested_catalog and suggested_catalog in available_catalogs:
-              selected_catalogs = [cat for cat in catalog_list if cat != suggested_catalog]
-              return selected_catalogs[choice_num - 1]
-            else:
-              return catalog_list[choice_num - 1]
+          if 0 <= choice_num < len(display_catalogs):
+            return display_catalogs[choice_num]
           elif choice_num == manual_entry_idx:
             # Manual entry option
             while True:
@@ -450,48 +441,40 @@ class AutoSetup:
       return new_schema or 'default'
 
     print('Available schemas:')
-    schema_list = list(available_schemas.keys())
 
-    # Show suggested schema first if it exists
+    # Build ordered display list: suggested first, then others
+    display_schemas = []
     if suggested_schema and suggested_schema in available_schemas:
-      print(f'   0. {suggested_schema} (suggested) - {available_schemas[suggested_schema]}')
-      start_idx = 1
-    else:
-      start_idx = 0
-
-    # Show other schemas
-    for i, (schema_name, access_level) in enumerate(available_schemas.items()):
+      display_schemas.append(suggested_schema)
+    for schema_name in available_schemas:
       if schema_name != suggested_schema:
-        print(f'   {start_idx + i}. {schema_name} - {access_level}')
+        display_schemas.append(schema_name)
 
-    create_option_num = len(schema_list) + (1 if suggested_schema in available_schemas else 0)
-    print(f'   {create_option_num}. Create new schema')
+    for i, schema_name in enumerate(display_schemas):
+      suffix = ' (suggested)' if schema_name == suggested_schema else ''
+      print(f'   {i}. {schema_name}{suffix} - {available_schemas[schema_name]}')
+
+    create_option_idx = len(display_schemas)
+    print(f'   {create_option_idx}. Create new schema')
+
+    max_choice = create_option_idx
 
     while True:
       try:
-        max_choice = len(schema_list) + (1 if suggested_schema in available_schemas else 0)
         choice = input(f'\nSelect schema (0-{max_choice}) or type schema name: ').strip()
 
         # Check if it's a number
         try:
           choice_num = int(choice)
-          if choice_num == 0 and suggested_schema and suggested_schema in available_schemas:
-            return suggested_schema
-          elif 1 <= choice_num <= len(schema_list):
-            # Adjust index based on whether suggested schema is shown
-            if suggested_schema and suggested_schema in available_schemas:
-              selected_schemas = [sch for sch in schema_list if sch != suggested_schema]
-              return selected_schemas[choice_num - 1]
-            else:
-              return schema_list[choice_num - 1]
-          elif choice_num == len(schema_list) + (1 if suggested_schema in available_schemas else 0):
+          if 0 <= choice_num < len(display_schemas):
+            return display_schemas[choice_num]
+          elif choice_num == create_option_idx:
             # Create new schema
             new_schema = input('Enter new schema name: ').strip()
             if new_schema:
               print(f'💡 Will create new schema: {new_schema}')
               return new_schema
           else:
-            max_choice = len(schema_list) + (1 if suggested_schema in available_schemas else 0)
             print(f'❌ Please enter a number between 0 and {max_choice}')
             continue
         except ValueError:
@@ -668,19 +651,19 @@ class AutoSetup:
 
     print('Available chat completion models:')
 
-    # Show suggested model first if it exists
+    # Build ordered display list: suggested first, then others
+    display_models = []
     if suggested_model and suggested_model in available_models:
-      print(f'   0. {suggested_model} (suggested)')
-      start_idx = 1
-    else:
-      start_idx = 0
-
-    # Show other models
-    for i, model_name in enumerate(available_models):
+      display_models.append(suggested_model)
+    for model_name in available_models:
       if model_name != suggested_model:
-        print(f'   {start_idx + i}. {model_name}')
+        display_models.append(model_name)
 
-    max_choice = len(available_models) - 1 + (1 if suggested_model in available_models else 0)
+    for i, model_name in enumerate(display_models):
+      suffix = ' (suggested)' if model_name == suggested_model else ''
+      print(f'   {i}. {model_name}{suffix}')
+
+    max_choice = len(display_models) - 1
 
     while True:
       try:
@@ -688,20 +671,13 @@ class AutoSetup:
 
         # Use default if empty
         if not choice:
-          return suggested_model or available_models[0]
+          return display_models[0]
 
         # Check if it's a number
         try:
           choice_num = int(choice)
-          if choice_num == 0 and suggested_model and suggested_model in available_models:
-            return suggested_model
-          elif 1 <= choice_num <= len(available_models):
-            # Adjust index based on whether suggested model is shown
-            if suggested_model and suggested_model in available_models:
-              selected_models = [model for model in available_models if model != suggested_model]
-              return selected_models[choice_num - 1]
-            else:
-              return available_models[choice_num - 1]
+          if 0 <= choice_num < len(display_models):
+            return display_models[choice_num]
           else:
             print(f'❌ Please enter a number between 0 and {max_choice}')
             continue
@@ -714,7 +690,85 @@ class AutoSetup:
             continue
 
       except KeyboardInterrupt:
-        return suggested_model or available_models[0]
+        return display_models[0]
+
+  def _get_available_sql_warehouses(self) -> list:
+    """Get list of available SQL warehouses from Databricks."""
+    try:
+      spinner = Spinner('Discovering available SQL warehouses...')
+      spinner.start()
+      try:
+        warehouses = list(self.client.warehouses.list())
+        spinner.stop('Found SQL warehouses')
+      except Exception as e:
+        spinner.stop()
+        raise e
+
+      available = []
+      for wh in warehouses:
+        state = getattr(wh, 'state', 'UNKNOWN')
+        name = getattr(wh, 'name', 'Unknown')
+        wh_id = getattr(wh, 'id', None)
+        if wh_id:
+          available.append({'id': wh_id, 'name': name, 'state': str(state)})
+
+      return available
+
+    except Exception as e:
+      print(f'⚠️  Could not discover SQL warehouses: {e}')
+      return []
+
+  def _prompt_for_sql_warehouse(self) -> str:
+    """Interactive SQL warehouse selection for MLflow tracing."""
+    print('\n🏭 SQL Warehouse Selection (for MLflow Tracing)')
+    print('   MLflow traces will be logged to Unity Catalog tables via this warehouse.\n')
+
+    available = self._get_available_sql_warehouses()
+
+    if not available:
+      print('No SQL warehouses found. Please enter a warehouse ID manually.')
+      while True:
+        wh_id = input('SQL Warehouse ID: ').strip()
+        if wh_id:
+          return wh_id
+        print('❌ Warehouse ID cannot be empty')
+
+    print('Available SQL warehouses:')
+    for i, wh in enumerate(available):
+      state_indicator = '🟢' if 'RUNNING' in wh['state'] else '🔴'
+      print(f'   {i}. {wh["name"]} ({wh["id"]}) {state_indicator} {wh["state"]}')
+
+    manual_entry_idx = len(available)
+    print(f'   {manual_entry_idx}. Enter warehouse ID manually')
+
+    while True:
+      try:
+        choice = input(f'\nSelect warehouse (0-{manual_entry_idx}): ').strip()
+
+        try:
+          choice_num = int(choice)
+          if 0 <= choice_num < len(available):
+            selected = available[choice_num]
+            print(f'✅ Selected: {selected["name"]} ({selected["id"]})')
+            return selected['id']
+          elif choice_num == manual_entry_idx:
+            wh_id = input('SQL Warehouse ID: ').strip()
+            if wh_id:
+              return wh_id
+            print('❌ Warehouse ID cannot be empty')
+            continue
+          else:
+            print(f'❌ Please enter a number between 0 and {manual_entry_idx}')
+            continue
+        except ValueError:
+          # User typed an ID directly
+          if choice:
+            return choice
+          print('❌ Invalid input')
+          continue
+
+      except KeyboardInterrupt:
+        return available[0]['id'] if available else ''
 
   def _generate_default_app_name(self) -> str:
     """Generate a default app name with 4 random characters."""
@@ -783,6 +837,7 @@ class AutoSetup:
           'UC_SCHEMA': 'UC_SCHEMA',
           'DATABRICKS_APP_NAME': 'DATABRICKS_APP_NAME',
           'LLM_MODEL': 'LLM_MODEL',
+          'MLFLOW_TRACING_SQL_WAREHOUSE_ID': 'MLFLOW_TRACING_SQL_WAREHOUSE_ID',
           'DEPLOYMENT_MODE': 'DEPLOYMENT_MODE',
           'MLFLOW_EXPERIMENT_ID': 'MLFLOW_EXPERIMENT_ID',
           'LHA_SOURCE_CODE_PATH': 'LHA_SOURCE_CODE_PATH',
@@ -904,18 +959,20 @@ class AutoSetup:
           success = False
           break
 
-      # Show final results
-      self._show_final_results(success)
-      return success
-
     except KeyboardInterrupt:
       print('\n⚠️  Setup interrupted by user')
-      self._show_final_results(False)
-      return False
+      success = False
     except Exception as e:
       print(f'\n❌ Unexpected error during setup: {e}')
-      self._show_final_results(False)
-      return False
+      success = False
+
+    # Show final results outside try/except to avoid double output on error
+    try:
+      self._show_final_results(success)
+    except Exception as e:
+      print(f'\n⚠️  Error displaying final results: {e}')
+
+    return success
 
   def _validate_prerequisites(self) -> bool:
     """Validate prerequisites before setup."""
@@ -1027,6 +1084,9 @@ class AutoSetup:
     # LLM model selection
     llm_model = self._prompt_for_llm_model('databricks-claude-3-7-sonnet')
 
+    # SQL warehouse selection for MLflow tracing
+    sql_warehouse_id = self._prompt_for_sql_warehouse()
+
     # Store configuration
     self.config = {
       'DATABRICKS_HOST': workspace_url,
@@ -1034,6 +1094,7 @@ class AutoSetup:
       'UC_SCHEMA': schema,
       'DATABRICKS_APP_NAME': app_name,
       'LLM_MODEL': llm_model,
+      'MLFLOW_TRACING_SQL_WAREHOUSE_ID': sql_warehouse_id,
       'DEPLOYMENT_MODE': deployment_mode,
     }
 
@@ -1057,6 +1118,7 @@ class AutoSetup:
       'UC_SCHEMA',
       'DATABRICKS_APP_NAME',
       'LLM_MODEL',
+      'MLFLOW_TRACING_SQL_WAREHOUSE_ID',
     ]
 
     for var in required_at_this_stage:
@@ -1132,6 +1194,8 @@ class AutoSetup:
     # LLM model
     llm_model = self.config.get('LLM_MODEL', 'Unknown')
     print(f'🤖 LLM Model: {llm_model}')
+    sql_warehouse_id = self.config.get('MLFLOW_TRACING_SQL_WAREHOUSE_ID', 'Unknown')
+    print(f'🏭 SQL Warehouse (Tracing): {sql_warehouse_id}')
 
     # Sample data
     print('\n📊 Sample Data Setup:')
@@ -1358,8 +1422,22 @@ class AutoSetup:
       print(f'❌ Failed to create app: {e}')
       return False
 
+  def _execute_sql(self, sql: str) -> None:
+    """Execute a SQL statement via the SQL warehouse."""
+    warehouse_id = self.config.get('MLFLOW_TRACING_SQL_WAREHOUSE_ID')
+    if not warehouse_id:
+      raise Exception('MLFLOW_TRACING_SQL_WAREHOUSE_ID not configured')
+
+    response = self.client.statement_execution.execute_statement(
+      warehouse_id=warehouse_id,
+      statement=sql,
+      wait_timeout='30s',
+    )
+    if response.status and response.status.state.value == 'FAILED':
+      raise Exception(f'SQL failed: {response.status.error}')
+
   def _setup_permissions(self) -> bool:
-    """Setup permissions for app service principal."""
+    """Setup permissions for app service principal via SQL grants."""
     print('🔐 Setting up permissions...')
 
     if self.dry_run:
@@ -1369,45 +1447,64 @@ class AutoSetup:
     try:
       app_name = self.config['DATABRICKS_APP_NAME']
 
-      # Get app service principal (this should work after deployment)
+      # Get app service principal
       service_principal = self.resource_manager.get_app_service_principal(app_name)
 
-      if service_principal:
-        print(f'✅ Found app service principal: {service_principal}')
+      if not service_principal:
+        print(
+          '⚠️  App service principal not available yet - permissions may need to be set manually'
+        )
+        print("   This is normal if the app hasn't been deployed yet")
+        return True
 
-        # Grant catalog permissions first (USE CATALOG)
-        catalog_name = self.config['UC_CATALOG']
-        print(f'🔐 Granting catalog permissions on {catalog_name}...')
-        self.resource_manager.grant_catalog_permissions(
-          catalog_name, service_principal, permissions=['USE CATALOG']
+      # Resolve application_id for the service principal
+      application_id = self.resource_manager.get_service_principal_application_id(
+        service_principal
+      )
+      print(f'✅ Found app service principal: {service_principal} (ID: {application_id})')
+
+      catalog = self.config['UC_CATALOG']
+      schema = self.config['UC_SCHEMA']
+
+      # Grant USAGE on catalog and schema
+      grant_statements = [
+        f'GRANT USAGE ON CATALOG `{catalog}` TO `{application_id}`',
+        f'GRANT USAGE ON SCHEMA `{catalog}`.`{schema}` TO `{application_id}`',
+        f'GRANT CREATE FUNCTION, EXECUTE, MANAGE ON SCHEMA `{catalog}`.`{schema}` TO `{application_id}`',
+      ]
+
+      # Grant MODIFY + SELECT on UC trace tables
+      trace_tables = [
+        'mlflow_experiment_trace_otel_logs',
+        'mlflow_experiment_trace_otel_metrics',
+        'mlflow_experiment_trace_otel_spans',
+      ]
+      for table in trace_tables:
+        grant_statements.append(
+          f'GRANT MODIFY, SELECT ON TABLE `{catalog}`.`{schema}`.`{table}` TO `{application_id}`'
         )
 
-        # Grant schema permissions (ALL PERMISSIONS + MANAGE)
-        schema_name = f'{self.config["UC_CATALOG"]}.{self.config["UC_SCHEMA"]}'
-        print(f'🔐 Granting schema permissions on {schema_name}...')
-        self.resource_manager.grant_schema_permissions(
-          schema_name, service_principal, permissions=['ALL_PRIVILEGES', 'MANAGE']
-        )
+      for sql in grant_statements:
+        try:
+          self._execute_sql(sql)
+          print(f'   ✅ {sql}')
+        except Exception as e:
+          print(f'   ⚠️  {sql} — {e}')
 
-        # Grant experiment permissions (CAN MANAGE)
-        experiment_id = self.config['MLFLOW_EXPERIMENT_ID']
+      # Grant experiment permissions (CAN MANAGE) via SDK
+      experiment_id = self.config.get('MLFLOW_EXPERIMENT_ID')
+      if experiment_id:
         print(f'🔐 Granting experiment permissions on {experiment_id}...')
         self.resource_manager.grant_experiment_permissions(
           experiment_id, service_principal, permissions=['CAN_MANAGE']
         )
 
-        # Grant model serving endpoint access
-        llm_model = self.config.get('LLM_MODEL', 'databricks-claude-3-7-sonnet')
-        print(f'🔐 Granting model serving access to {llm_model}...')
-        self.resource_manager.grant_model_serving_permissions(app_name, llm_model)
+      # Grant model serving endpoint access via SDK
+      llm_model = self.config.get('LLM_MODEL', 'databricks-claude-3-7-sonnet')
+      print(f'🔐 Granting model serving access to {llm_model}...')
+      self.resource_manager.grant_model_serving_permissions(app_name, llm_model)
 
-        print('✅ Permissions set successfully')
-      else:
-        print(
-          '⚠️  App service principal not available yet - permissions may need to be set manually'
-        )
-        print("   This is normal if the app hasn't been deployed yet")
-
+      print('✅ Permissions set successfully')
       return True
     except Exception as e:
       print(f'⚠️  Permission setup had issues: {e}')
@@ -1630,12 +1727,13 @@ class AutoSetup:
 
   def _get_app_url(self, app_name: str) -> str:
     """Get the URL of the deployed Databricks App."""
-    try:
-      app = self.client.apps.get(app_name)
-      if hasattr(app, 'url') and app.url:
-        return app.url
-    except Exception as e:
-      print(f'⚠️  Could not get app URL from API: {e}')
+    if self.client:
+      try:
+        app = self.client.apps.get(app_name)
+        if hasattr(app, 'url') and app.url:
+          return app.url
+      except Exception as e:
+        print(f'⚠️  Could not get app URL from API: {e}')
 
     # Fallback to constructed URL
     workspace_host = self.config.get('DATABRICKS_HOST', '').rstrip('/')
@@ -1646,12 +1744,19 @@ class AutoSetup:
     workspace_host = self._ensure_https_protocol(self.config.get('DATABRICKS_HOST', '')).rstrip('/')
     lha_source_code_path = self.config.get('LHA_SOURCE_CODE_PATH')
 
-    for i in self.client.workspace.list(
-      f'{lha_source_code_path}/mlflow_demo/notebooks', recursive=True
-    ):
-      if i.path and i.path.endswith(notebook_name):
-        return f'{workspace_host}/editor/notebooks/{i.resource_id}'
-    return 'NOT FOUND'
+    if not self.client or not lha_source_code_path:
+      return f'{workspace_host}/#workspace (notebook: {notebook_name})'
+
+    try:
+      for i in self.client.workspace.list(
+        f'{lha_source_code_path}/mlflow_demo/notebooks', recursive=True
+      ):
+        if i.path and i.path.endswith(notebook_name):
+          return f'{workspace_host}/editor/notebooks/{i.resource_id}'
+    except Exception as e:
+      print(f'⚠️  Could not list workspace notebooks: {e}')
+
+    return f'{workspace_host}/#workspace (notebook: {notebook_name})'
 
   def _ensure_https_protocol(self, host: str | None) -> str:
     """Ensure the host URL has HTTPS protocol."""
@@ -1690,7 +1795,6 @@ class AutoSetup:
         print(f'📱 Databricks App: {app_url}')
         print('   ↳ Interactive demo application ready to use')
       else:
-        workspace_path = self.config.get('LHA_SOURCE_CODE_PATH', '/Workspace/...')
         notebook_url = self._get_notebook_url('0_demo_overview')
         print(f'📓 Demo Overview Notebook: {notebook_url}')
         print('   ↳ Start here for interactive learning experience')
@@ -1741,12 +1845,11 @@ class AutoSetup:
       print('\n📊 Setup Progress:')
       self.progress.show_detailed_progress()
 
-      # For notebook-only mode, show the primary access link at the very bottom in a super obvious way
+      # For notebook-only mode, show the primary access link at the bottom
       if deployment_mode == 'notebook_only':
         print('\n\n' + '=' * 80)
         print('🚨 🚨 🚨  YOUR NOTEBOOK IS READY - CLICK HERE TO START  🚨 🚨 🚨')
         print('=' * 80)
-        workspace_path = self.config.get('LHA_SOURCE_CODE_PATH', '/Workspace/...')
         notebook_url = self._get_notebook_url('0_demo_overview')
         print(f'\n🎯 👉 START HERE: {notebook_url}')
         print('\n   ↳ This opens the Demo Overview Notebook - your starting point!')

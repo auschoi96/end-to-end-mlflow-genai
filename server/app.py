@@ -15,7 +15,7 @@ from mlflow_demo.utils.mlflow_helpers import get_mlflow_experiment_id
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
-from .routes import dc_assistant, evaluation, helper
+from .routes import dc_assistant, evaluation, helper, optimization
 
 # Configure logging for Databricks Apps monitoring
 # Logs written to stdout/stderr will be available in Databricks Apps UI and /logz endpoint
@@ -74,6 +74,7 @@ API_PREFIX = '/api'
 app.include_router(dc_assistant.router)
 app.include_router(evaluation.router)
 app.include_router(helper.router)
+app.include_router(optimization.router)
 
 
 # Common/shared models

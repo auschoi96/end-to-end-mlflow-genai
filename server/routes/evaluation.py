@@ -15,6 +15,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix='/api/evaluation', tags=['evaluation'])
 
+# Model URI for LLM-as-judge scorers. Overridable via env for quick swaps without
+# redeploying code. Deterministic scorers (ToolCallCorrectness, ToolCallEfficiency)
+# don't take this kwarg and are skipped below.
+JUDGE_MODEL = os.environ.get('JUDGE_MODEL', 'databricks:/databricks-claude-sonnet-4-6')
+
+# Scorers that call an LLM judge and accept a `model=` kwarg.
+LLM_JUDGE_BUILTINS = {'RelevanceToQuery', 'Safety'}
+
 # 10 representative coaching questions for live demo evaluation
 EVAL_QUESTIONS = [
   'How does the 2024 Kansas City Chiefs offense approach third-and-long situations?',
@@ -73,7 +81,11 @@ async def run_evaluation(request: RunEvalRequest):
 
       for name in request.builtin_judges:
         if name in builtin_map:
-          scorers.append(builtin_map[name]())
+          cls = builtin_map[name]
+          if name in LLM_JUDGE_BUILTINS:
+            scorers.append(cls(model=JUDGE_MODEL))
+          else:
+            scorers.append(cls())
           logger.info(f'Added built-in scorer: {name}')
         else:
           logger.warning(f'Built-in scorer not found: {name}')
@@ -82,7 +94,7 @@ async def run_evaluation(request: RunEvalRequest):
       logger.info(f'Requested custom guidelines: {[g.get("name") for g in request.custom_guidelines]}')
       for g in request.custom_guidelines:
         if g.get('name') and g.get('guideline'):
-          scorers.append(Guidelines(name=g['name'], guidelines=g['guideline']))
+          scorers.append(Guidelines(name=g['name'], guidelines=g['guideline'], model=JUDGE_MODEL))
           logger.info(f'Added custom guideline scorer: {g["name"]}')
 
       total_questions = len(EVAL_QUESTIONS)
@@ -181,11 +193,11 @@ async def run_session_evaluation(request: RunSessionEvalRequest):
         'UserFrustration': mlflow_scorers.UserFrustration,
       }
 
-      # Build scorers
+      # Build scorers. All session-level scorers are LLM judges, so route them to JUDGE_MODEL.
       scorers = []
       for name in request.session_judges:
         if name in session_scorer_map:
-          scorers.append(session_scorer_map[name]())
+          scorers.append(session_scorer_map[name](model=JUDGE_MODEL))
           logger.info(f'Added session scorer: {name}')
         else:
           logger.warning(f'Session scorer not found: {name}')

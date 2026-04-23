@@ -149,29 +149,61 @@ export function JudgeAlignment() {
   const [hasRun, setHasRun] = React.useState(false);
   const [optimizationProgress, setOptimizationProgress] = React.useState(0);
 
-  const runOptimization = () => {
+  const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
+  const [progressMessage, setProgressMessage] = React.useState<string>("");
+
+  const runOptimization = async () => {
     setIsRunning(true);
     setHasRun(false);
     setOptimizationProgress(0);
+    setErrorMsg(null);
+    setProgressMessage("Starting...");
 
-    // Simulate optimization progress
-    const progressInterval = setInterval(() => {
-      setOptimizationProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(progressInterval);
-          return 100;
-        }
-        return prev + 10;
+    try {
+      const response = await fetch("/api/optimization/align-judge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ optimizer: selectedOptimizer }),
       });
-    }, 300);
 
-    // Simulate completion after 3 seconds
-    setTimeout(() => {
-      clearInterval(progressInterval);
-      setOptimizationProgress(100);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error("No response body");
+
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === "progress") {
+              if (typeof data.percent === "number") setOptimizationProgress(data.percent);
+              if (data.message) setProgressMessage(data.message);
+            } else if (data.type === "done") {
+              setOptimizationProgress(100);
+              setProgressMessage("Alignment complete");
+              setHasRun(true);
+              setIsRunning(false);
+            } else if (data.type === "error") {
+              setErrorMsg(data.error);
+              setIsRunning(false);
+            }
+          } catch (e) {
+            console.error("SSE parse error:", e);
+          }
+        }
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || "Alignment failed");
       setIsRunning(false);
-      setHasRun(true);
-    }, 3000);
+    }
   };
 
   const introSection = <MarkdownContent content={introContent} />;
@@ -589,12 +621,14 @@ export function JudgeAlignment() {
                 <div className="mt-4 space-y-2">
                   <Progress value={optimizationProgress} className="w-full" />
                   <p className="text-xs text-center text-muted-foreground">
-                    {optimizationProgress < 30 && "Loading labeled traces with coach feedback..."}
-                    {optimizationProgress >= 30 && optimizationProgress < 60 && selectedOptimizer === "simba" && "Analyzing disagreements and proposing edits..."}
-                    {optimizationProgress >= 30 && optimizationProgress < 60 && selectedOptimizer === "memalign" && "Building semantic and episodic memories..."}
-                    {optimizationProgress >= 60 && optimizationProgress < 100 && "Refining judge instructions..."}
-                    {optimizationProgress === 100 && "Alignment complete!"}
+                    {progressMessage || "Running..."}
                   </p>
+                </div>
+              )}
+
+              {errorMsg && (
+                <div className="mt-4 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200">
+                  <span className="font-medium">Error:</span> {errorMsg}
                 </div>
               )}
             </div>

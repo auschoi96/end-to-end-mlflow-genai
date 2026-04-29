@@ -247,7 +247,7 @@ print(f'Initial Judge Text /n {football_analysis_judge.instructions}')
 
 aligned_judge_memalign = football_analysis_judge.align(
     traces=valid_traces,
-    optimizer=MemAlignOptimizer(reflection_lm="databricks:/databricks-claude-opus-4-5", embedding_model="openai/text-embedding-3-large",) #Databricks not supported right now
+    optimizer=MemAlignOptimizer(reflection_lm="databricks:/databricks-claude-opus-4-5", embedding_model="databricks:/databricks-qwen3-embedding-0-6b",)
 )
 
 # COMMAND ----------

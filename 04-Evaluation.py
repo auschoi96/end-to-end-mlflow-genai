@@ -157,10 +157,15 @@ except ValueError as e:
 
 from agent import AGENT
 from mlflow.genai import evaluate
+from mlflow.types.responses import Message, ResponsesAgentRequest
+
+def _predict_fn(input):
+    messages = [Message(**m) if isinstance(m, dict) else m for m in input]
+    return AGENT.predict(ResponsesAgentRequest(input=messages))
 
 results = evaluate(
     data=eval_dataset_records,
-    predict_fn=lambda input: AGENT.predict({"input": input}),
+    predict_fn=_predict_fn,
     scorers=scorers_list
 )
 

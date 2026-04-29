@@ -214,7 +214,7 @@ Your Databricks App needs specific permissions to access the MLflow experiment a
 - [ ] Click on **Edit**
 - [ ] Click **Next**
 - [ ] Click **Add Resource** and choose **Serving Endpoint**
-- [ ] Select your model serving endpoint (`databricks-claude-3-7-sonnet` unless you changed the model)
+- [ ] Select your model serving endpoint (`databricks-claude-sonnet-4-6` unless you changed the model)
 - [ ] Press **Save**
 - [ ] This allows the app to call the LLM for the DC Assistant
 

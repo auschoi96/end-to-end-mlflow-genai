@@ -574,7 +574,7 @@ class AutoSetup:
       chat_models = sorted(list(set(potential_chat_models)))
 
       # Prioritize certain models at the top
-      priority_models = ['databricks-claude-3-7-sonnet', 'databricks-claude-sonnet-4', 'gpt-4o']
+      priority_models = ['databricks-claude-sonnet-4-6', 'databricks-claude-sonnet-4', 'gpt-4o']
       prioritized_models = []
 
       for priority in priority_models:
@@ -588,7 +588,7 @@ class AutoSetup:
       print(f'⚠️  Could not discover chat models: {e}')
       # Return default options
       return [
-        'databricks-claude-3-7-sonnet',
+        'databricks-claude-sonnet-4-6',
         'databricks-claude-sonnet-4',
         'databricks-meta-llama-3-3-70b-instruct',
         'gpt-4o',
@@ -647,7 +647,7 @@ class AutoSetup:
 
     if not available_models:
       print('❌ No chat models found. Using default.')
-      return suggested_model or 'databricks-claude-3-7-sonnet'
+      return suggested_model or 'databricks-claude-sonnet-4-6'
 
     print('Available chat completion models:')
 
@@ -1082,7 +1082,7 @@ class AutoSetup:
       print(f'📓 Using default name for workspace sync: {app_name}')
 
     # LLM model selection
-    llm_model = self._prompt_for_llm_model('databricks-claude-3-7-sonnet')
+    llm_model = self._prompt_for_llm_model('databricks-claude-sonnet-4-6')
 
     # SQL warehouse selection for MLflow tracing
     sql_warehouse_id = self._prompt_for_sql_warehouse()
@@ -1500,7 +1500,7 @@ class AutoSetup:
         )
 
       # Grant model serving endpoint access via SDK
-      llm_model = self.config.get('LLM_MODEL', 'databricks-claude-3-7-sonnet')
+      llm_model = self.config.get('LLM_MODEL', 'databricks-claude-sonnet-4-6')
       print(f'🔐 Granting model serving access to {llm_model}...')
       self.resource_manager.grant_model_serving_permissions(app_name, llm_model)
 

@@ -115,7 +115,7 @@ if [[ $REPLY != "3" ]]; then
         # Optional variables
         echo ""
         echo "📝 Optional configuration:"
-        read -p "LLM_MODEL (any Model Serving / AI Gateway endpoint, if not set, defaults to databricks-claude-3-7-sonnet): " LLM_MODEL
+        read -p "LLM_MODEL (any Model Serving / AI Gateway endpoint, if not set, defaults to databricks-claude-sonnet-4-6): " LLM_MODEL
         read -p "DATABRICKS_CONFIG_PROFILE (optional - press Enter to skip): " DATABRICKS_CONFIG_PROFILE
     fi
 fi
@@ -140,7 +140,7 @@ EOF
     if [ ! -z "$LLM_MODEL" ]; then
         echo "LLM_MODEL=\"$LLM_MODEL\"" >> "$ENV_FILE"
     else
-        echo "LLM_MODEL=\"databricks-claude-3-7-sonnet\"" >> "$ENV_FILE"
+        echo "LLM_MODEL=\"databricks-claude-sonnet-4-6\"" >> "$ENV_FILE"
     fi
 
     if [ ! -z "$DATABRICKS_CONFIG_PROFILE" ]; then
@@ -170,7 +170,7 @@ EOF
     if [ ! -z "$LLM_MODEL" ]; then
         echo "  LLM_MODEL: $LLM_MODEL"
     else
-        echo "  LLM_MODEL: databricks-claude-3-7-sonnet (default)"
+        echo "  LLM_MODEL: databricks-claude-sonnet-4-6 (default)"
     fi
     if [ ! -z "$DATABRICKS_CONFIG_PROFILE" ]; then
         echo "  DATABRICKS_CONFIG_PROFILE: $DATABRICKS_CONFIG_PROFILE"

@@ -18,7 +18,7 @@ client_local = OpenAI(
     base_url=f"{mlflow_creds.host}/serving-endpoints"
 )
 
-model = 'databricks-claude-3-7-sonnet'
+model = 'databricks-claude-sonnet-4-6'
 
 def call_llm(query, customer_data):
   mlflow.openai.autolog(disable=True)

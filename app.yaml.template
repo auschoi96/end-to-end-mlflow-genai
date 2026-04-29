@@ -21,6 +21,8 @@ env:
     value: 'placeholder-uc-schema'
   - name: 'MLFLOW_ENABLE_ASYNC_TRACE_LOGGING'
     value: 'placeholder-async-logging'
+  - name: 'MLFLOW_GENAI_EVAL_SKIP_TRACE_VALIDATION'
+    value: 'true'
   - name: 'PROMPT_NAME'
     value: 'placeholder-prompt-name'
   - name: 'PROMPT_ALIAS'

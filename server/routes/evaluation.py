@@ -98,6 +98,7 @@ async def run_evaluation(request: RunEvalRequest):
       # Build evaluation data - match notebook pattern
       # 'input' key matches predict_fn parameter name
       from mlflow_demo.agent.agent import AGENT
+      from mlflow.types.responses import Message, ResponsesAgentRequest
 
       eval_data = [
         {'inputs': {'input': [{'role': 'user', 'content': q}]}}
@@ -106,7 +107,10 @@ async def run_evaluation(request: RunEvalRequest):
 
       def predict_fn(input):
         AGENT.start_new_session()
-        return AGENT.predict({'input': input})
+        messages = [
+          Message(**m) if isinstance(m, dict) else m for m in input
+        ]
+        return AGENT.predict(ResponsesAgentRequest(input=messages))
 
       # Send progress updates as we go
       # We'll run the actual evaluation and stream progress

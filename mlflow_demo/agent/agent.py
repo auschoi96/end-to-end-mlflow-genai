@@ -246,6 +246,34 @@ for tool_spec in uc_toolkit.tools:
 # # See https://docs.databricks.com/generative-ai/agent-framework/unstructured-retrieval-tools.html
 
 
+def _merge_assistant_tool_calls(chat_msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge consecutive assistant messages that carry tool_calls into one.
+
+    The Anthropic translator on Databricks model serving requires that all
+    parallel tool_use blocks live in a single assistant message, immediately
+    followed by a single user message containing all corresponding tool_results.
+    mlflow's Responses→ChatCompletions converter, however, emits one assistant
+    message per function_call item, which Anthropic rejects with
+    "tool_use ids were found without tool_result blocks immediately after".
+    """
+    out: list[dict[str, Any]] = []
+    for m in chat_msgs:
+        prev = out[-1] if out else None
+        if (
+            m.get("role") == "assistant"
+            and m.get("tool_calls")
+            and prev is not None
+            and prev.get("role") == "assistant"
+            and prev.get("tool_calls")
+        ):
+            prev["tool_calls"] = list(prev["tool_calls"]) + list(m["tool_calls"])
+            if m.get("content") and not prev.get("content"):
+                prev["content"] = m["content"]
+        else:
+            out.append(dict(m))
+    return out
+
+
 def _safe_parse_tool_arguments(raw_args: Any) -> dict:
     """Parse tool call arguments robustly.
     - Accepts dict (returns as-is) or JSON string.
@@ -347,11 +375,18 @@ class ToolCallingAgent(ResponsesAgent):
         return self._tools_dict[tool_name].exec_fn(**args)
 
     def call_llm(self, messages: list[dict[str, Any]]) -> Generator[dict[str, Any], None, None]:
+        # mlflow's Responses→ChatCompletions converter emits a separate
+        # assistant message per function_call. Anthropic (via Databricks gateway)
+        # rejects that pattern: parallel tool_use blocks must live in a single
+        # assistant message, with a single user message of tool_results after.
+        # We post-process the converted list to merge runs of assistant messages
+        # that all carry tool_calls into one.
+        chat_msgs = _merge_assistant_tool_calls(to_chat_completions_input(messages))
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="PydanticSerializationUnexpectedValue")
             for chunk in self.model_serving_client.chat.completions.create(
                 model=self.llm_endpoint,
-                messages=to_chat_completions_input(messages),
+                messages=chat_msgs,
                 tools=self.get_tool_specs(),
                 stream=True,
             ):
@@ -384,8 +419,23 @@ class ToolCallingAgent(ResponsesAgent):
             last_msg = messages[-1]
             if last_msg.get("role", None) == "assistant":
                 return
-            elif last_msg.get("type", None) == "function_call":
-                yield self.handle_tool_call(last_msg, messages)
+
+            # Drain *all* pending function_calls before calling the LLM again.
+            # Claude can emit multiple tool_use blocks in a single turn (parallel
+            # tool calling); each must have a corresponding tool_result before
+            # the next LLM call or Anthropic rejects the request.
+            handled_ids = {
+                m["call_id"] for m in messages
+                if m.get("type") == "function_call_output" and "call_id" in m
+            }
+            pending = [
+                m for m in messages
+                if m.get("type") == "function_call" and m.get("call_id") not in handled_ids
+            ]
+
+            if pending:
+                for tool_call in pending:
+                    yield self.handle_tool_call(tool_call, messages)
             else:
                 yield from output_to_responses_items_stream(
                     chunks=self.call_llm(messages), aggregator=messages
@@ -396,17 +446,11 @@ class ToolCallingAgent(ResponsesAgent):
             item=self.create_text_output_item("Max iterations reached. Stopping.", str(uuid4())),
         )
 
-    @mlflow.trace(span_type=SpanType.AGENT)
+    @mlflow.trace(span_type=SpanType.AGENT, name="conversation_turn")
     def predict(self, request: ResponsesAgentRequest) -> ResponsesAgentResponse:
         # Auto-generate session on first call
         if self.current_session_id is None:
             self.current_session_id = str(uuid4())
-
-        # Set trace metadata for session tracking
-        metadata = {"mlflow.trace.session": self.current_session_id}
-        if self.current_user_id:
-            metadata["mlflow.trace.user"] = self.current_user_id
-        mlflow.update_current_trace(metadata=metadata)
 
         # Extract user input for clean display
         user_content = None
@@ -420,30 +464,38 @@ class ToolCallingAgent(ResponsesAgent):
                     user_content = str(content)
                 break
 
-        with mlflow.start_span(name="conversation_turn", span_type=SpanType.AGENT) as span:
-            span.set_inputs({"request": user_content})
+        # Set inputs and session metadata on the active span from @mlflow.trace.
+        # Guard with a None check so we don't crash when called outside a trace
+        # context (e.g., mlflow.genai.evaluate's data-validation pre-check).
+        active = mlflow.get_current_active_span()
+        if active is not None:
+            active.set_inputs({"request": user_content})
+            metadata = {"mlflow.trace.session": self.current_session_id}
+            if self.current_user_id:
+                metadata["mlflow.trace.user"] = self.current_user_id
+            mlflow.update_current_trace(metadata=metadata)
 
-            outputs = [
-                event.item
-                for event in self.predict_stream(request)
-                if event.type == "response.output_item.done"
-            ]
+        outputs = [
+            event.item
+            for event in self.predict_stream(request)
+            if event.type == "response.output_item.done"
+        ]
 
-            # Extract final assistant message for clean display
-            assistant_response = None
-            final_message = None
-            for item in reversed(outputs):
-                item_dict = item.model_dump() if hasattr(item, 'model_dump') else (item if isinstance(item, dict) else {})
-                if item_dict.get("type") == "message" and item_dict.get("role") == "assistant":
-                    final_message = item
-                    content = item_dict.get("content", [])
-                    if isinstance(content, list) and len(content) > 0:
-                        if isinstance(content[0], dict) and "text" in content[0]:
-                            assistant_response = content[0]["text"]
-                            break
+        # Extract final assistant message for clean display
+        assistant_response = None
+        final_message = None
+        for item in reversed(outputs):
+            item_dict = item.model_dump() if hasattr(item, 'model_dump') else (item if isinstance(item, dict) else {})
+            if item_dict.get("type") == "message" and item_dict.get("role") == "assistant":
+                final_message = item
+                content = item_dict.get("content", [])
+                if isinstance(content, list) and len(content) > 0:
+                    if isinstance(content[0], dict) and "text" in content[0]:
+                        assistant_response = content[0]["text"]
+                        break
 
-            if assistant_response:
-                span.set_outputs({"response": assistant_response})
+        if assistant_response and active is not None:
+            active.set_outputs({"response": assistant_response})
 
         return ResponsesAgentResponse(
             output=[final_message] if final_message else outputs,

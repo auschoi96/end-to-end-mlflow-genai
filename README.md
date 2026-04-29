@@ -126,7 +126,7 @@ Environment variables are configured in `.env` (created by the setup script). Ke
 | `DATABRICKS_HOST` | Your Databricks workspace URL |
 | `MLFLOW_EXPERIMENT_ID` | MLflow experiment for tracing and evaluation |
 | `UC_CATALOG` / `UC_SCHEMA` | Unity Catalog location for agent tools and prompts |
-| `LLM_MODEL` | Model serving endpoint (e.g., `databricks-claude-3-7-sonnet`) |
+| `LLM_MODEL` | Model serving endpoint (e.g., `databricks-claude-sonnet-4-6`) |
 | `PROMPT_NAME` | Prompt Registry name (`dc_assistant_system_prompt`) |
 
 ## MLflow 3 capabilities demonstrated

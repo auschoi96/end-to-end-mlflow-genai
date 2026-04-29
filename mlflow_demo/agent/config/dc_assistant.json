@@ -7,7 +7,7 @@
     "prompt_name": "dc_assistant_system_prompt"
   },
   "llm": {
-    "endpoint_name": "databricks-claude-3-7-sonnet"
+    "endpoint_name": "databricks-claude-sonnet-4-6"
   },
   "tools": {
     "uc_tool_names": [

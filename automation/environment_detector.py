@@ -371,7 +371,7 @@ class EnvironmentDetector:
 
     # Set default LLM model if not provided
     if 'LLM_MODEL' not in config:
-      config['LLM_MODEL'] = 'databricks-claude-3-7-sonnet'
+      config['LLM_MODEL'] = 'databricks-claude-sonnet-4-6'
 
     # Derive MLFLOW_TRACING_DESTINATION from UC_CATALOG and UC_SCHEMA
     uc_catalog = config.get('UC_CATALOG')

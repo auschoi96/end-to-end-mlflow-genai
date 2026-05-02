@@ -23,6 +23,7 @@ from agents import (
 )
 from agents.tracing import set_trace_processors
 from databricks_openai import AsyncDatabricksOpenAI
+from mlflow.entities import SpanType
 
 from .telco_tools import TELCO_TOOLS
 
@@ -103,8 +104,8 @@ async def stream_telco_response(
 ) -> AsyncGenerator[dict[str, Any], None]:
   """Run the telco agent and yield SSE-shaped event dicts.
 
-  Yields events in the legacy frontend schema so the existing telco UI
-  (TelcoChat, TelcoIntelligentPanel) continues to work without changes:
+  Events match the legacy frontend schema so the existing telco UI
+  (TelcoChat, TelcoIntelligentPanel) continues to work:
     - routing(agent_type, routing_decision)
     - tool_call(tool_name, call_id, arguments)
     - tool_result(call_id, output)
@@ -114,7 +115,7 @@ async def stream_telco_response(
   """
   _init_once()
 
-  # Pin the experiment for this request so traces don't bleed across.
+  # Pin the experiment for this request so traces don't cross-pollinate.
   try:
     if experiment_id:
       mlflow.set_experiment(experiment_id=experiment_id)
@@ -124,41 +125,32 @@ async def stream_telco_response(
     logger.warning('telco orchestrator: set_experiment failed: %s', e)
 
   selected_model = model or os.getenv('TELCO_MODEL', 'databricks-claude-sonnet-4-5')
-  agent = _build_agent(selected_model)
-  conv = _format_history(conversation_history, message, customer_id)
 
   full_text_parts: list[str] = []
   tools_used: list[dict[str, Any]] = []
+
+  yield {
+    'type': 'routing',
+    'agent_type': 'telco_supervisor',
+    'routing_decision': f'Routed to TelcoSupportAgent ({selected_model})',
+  }
+
+  try:
+    async for event in _streamed_run(message, customer_id, conversation_history, selected_model):
+      async for shaped in _shape_event(event, full_text_parts, tools_used):
+        yield shaped
+  except Exception as e:
+    logger.exception('telco orchestrator stream failed')
+    yield {'type': 'error', 'error': str(e), 'done': True}
+    return
+
+  # mlflow.openai.autolog and the @mlflow.trace wrapper above produce one or
+  # more traces during the run. Grab the latest one to surface in the UI.
   trace_id: str | None = None
-
-  with mlflow.start_span(name='telco_chat', attributes={'customer_id': customer_id}) as span:
-    if span and getattr(span, 'trace_id', None):
-      trace_id = span.trace_id
-
-    # Initial routing event so the reasoning panel has a header.
-    yield {
-      'type': 'routing',
-      'agent_type': 'telco_supervisor',
-      'routing_decision': f'Routed to TelcoSupportAgent ({selected_model})',
-    }
-
-    try:
-      result = Runner.run_streamed(agent, input=conv)
-      async for event in result.stream_events():
-        async for shaped in _shape_event(event, full_text_parts, tools_used):
-          yield shaped
-    except Exception as e:
-      logger.exception('telco orchestrator stream failed')
-      yield {'type': 'error', 'error': str(e), 'done': True}
-      return
-
-  # Try to get a real MLflow trace_id if span had one
-  if not trace_id:
-    try:
-      active = mlflow.get_current_active_trace()
-      trace_id = active.info.request_id if active else None
-    except Exception:
-      pass
+  try:
+    trace_id = mlflow.get_last_active_trace_id()
+  except Exception:
+    pass
 
   yield {
     'type': 'completion',
@@ -169,6 +161,33 @@ async def stream_telco_response(
     'trace_id': trace_id,
     'done': True,
   }
+
+
+@mlflow.trace(name='telco_chat', span_type=SpanType.AGENT)
+async def _streamed_run(
+  message: str,
+  customer_id: str,
+  conversation_history: list[dict[str, str]],
+  selected_model: str,
+):
+  """Single-trace wrapper around the Agents SDK streaming run.
+
+  Decorating an async generator with @mlflow.trace keeps the trace open for
+  the entire stream lifetime so all child OpenAI + tool spans roll up under
+  one parent trace.
+  """
+  mlflow.update_current_trace(
+    metadata={
+      'mlflow.trace.session': customer_id,
+      'customer_id': customer_id,
+    },
+    request_preview=message,
+  )
+  agent = _build_agent(selected_model)
+  conv = _format_history(conversation_history, message, customer_id)
+  result = Runner.run_streamed(agent, input=conv)
+  async for event in result.stream_events():
+    yield event
 
 
 async def _shape_event(event: Any, text_parts: list[str], tools_used: list[dict[str, Any]]):

@@ -1,4 +1,5 @@
 export type ViewType =
+  | "telco"
   | "chat"
   | "dc-assistant"
   | "demo-overview"
@@ -10,7 +11,8 @@ export type ViewType =
   | "step6-human-review";
 
 export const routes: Record<ViewType, string> = {
-  "demo-overview": "/",
+  telco: "/",
+  "demo-overview": "/overview",
   chat: "/chat",
   "dc-assistant": "/dc-assistant",
   "step1-tracing": "/tracing",
@@ -33,7 +35,7 @@ export const pathToViewType: Record<string, ViewType> = Object.entries(
 );
 
 export const getViewTypeFromPath = (pathname: string): ViewType => {
-  return pathToViewType[pathname] || "demo-overview";
+  return pathToViewType[pathname] || "telco";
 };
 
 export const getPathFromViewType = (viewType: ViewType): string => {

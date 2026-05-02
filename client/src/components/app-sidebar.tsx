@@ -21,6 +21,7 @@ import {
   Globe,
   Trophy,
   HelpCircle,
+  Headphones,
 } from "lucide-react";
 
 import { NavMain } from "@/components/nav-main";
@@ -61,6 +62,13 @@ const data = {
     },
   ],
   mlflowSteps: [
+    {
+      title: "Telco Support Agent",
+      value: "telco",
+      icon: Headphones,
+      description:
+        "Start here — chat with a production-style agent traced by MLflow",
+    },
     {
       title: "Demo Overview",
       value: "demo-overview",

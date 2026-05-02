@@ -36,18 +36,12 @@ async def lifespan(app: FastAPI):
   # Startup
   logger.info('Starting application...')
 
-  # Configure UC-backed MLflow tracing once at startup so both telco and NFL
-  # request paths emit traces to the same UC schema. Both helpers no-op
-  # cleanly when their required env vars are missing.
-  try:
-    from mlflow_demo.utils.mlflow_helpers import (
-      link_experiment_to_uc_schema,
-      setup_tracing_destination,
-    )
-    link_experiment_to_uc_schema()
-    setup_tracing_destination()
-  except Exception as e:
-    logger.warning('UC tracing setup skipped: %s', e)
+  # Don't call mlflow.tracing.set_destination at app startup. The experiment
+  # is already linked to a specific UC trace table via its
+  # databricksTraceDestinationPath tag; setting a process-global schema-level
+  # destination overrides that link and routes traces to a non-existent
+  # mlflow_experiment_trace_otel_spans table. Per-request mlflow.set_experiment
+  # is enough — MLflow resolves the right destination from the experiment.
 
   logger.info('Application startup complete')
 

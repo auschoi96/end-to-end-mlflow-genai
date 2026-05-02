@@ -66,8 +66,6 @@ env:
     value: 'databricks-claude-sonnet-4-5'
   - name: 'TELCO_FUNCTION_PREFIX'
     value: 'main.austin_choi_demo'
-  - name: 'TELCO_TOOL_WAREHOUSE_ID'
-    value: '75fd8278393d07eb'
   - name: 'TELCO_MLFLOW_EXPERIMENT_ID'
     value: '2049197043893135'
   - name: 'TELCO_MLFLOW_EXPERIMENT_PATH'

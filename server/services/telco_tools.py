@@ -1,57 +1,57 @@
 """function_tool wrappers around the telco UC functions in main.austin_choi_demo.
 
-Each tool issues a SQL Statements API call against the configured warehouse.
-The async SDK call is wrapped via asyncio.to_thread so the FastAPI event loop
-stays responsive while the warehouse executes the function.
+Uses DatabricksFunctionClient with serverless execution, so we don't need a
+SQL warehouse grant for the app SP — UC routes the function call to managed
+serverless compute. The app SP only needs USE SCHEMA + EXECUTE on the schema
+(already granted).
 """
 
 import asyncio
-import json
 import logging
 import os
 from typing import Optional
 
 from agents import function_tool
-from databricks.sdk import WorkspaceClient
+from databricks_openai import DatabricksFunctionClient
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_WAREHOUSE = os.getenv('TELCO_TOOL_WAREHOUSE_ID') or os.getenv(
-  'MLFLOW_TRACING_SQL_WAREHOUSE_ID', '75fd8278393d07eb'
-)
 TARGET_FN_PREFIX = os.getenv('TELCO_FUNCTION_PREFIX', 'main.austin_choi_demo')
 
-
-def _quote(value: str) -> str:
-  """SQL-quote a string literal."""
-  return "'" + value.replace("'", "''") + "'"
-
-
-def _execute_sql(stmt: str) -> str:
-  """Execute a SQL statement synchronously and return the first row/col as a string."""
-  client = WorkspaceClient()
-  resp = client.statement_execution.execute_statement(
-    warehouse_id=DEFAULT_WAREHOUSE,
-    statement=stmt,
-    wait_timeout='30s',
-  )
-  if resp.status and resp.status.state and resp.status.state.value not in ('SUCCEEDED',):
-    err = resp.status.error.message if resp.status.error else 'unknown error'
-    return json.dumps({'error': f'SQL failed: {err}'})
-  if not resp.result or not resp.result.data_array:
-    return json.dumps({'error': 'no rows'})
-  return resp.result.data_array[0][0] or '{}'
+# Lazy-initialized singleton: DatabricksFunctionClient bootstraps a
+# WorkspaceClient + serverless session, both of which we want to share across
+# tool calls. Initializing per-call would re-auth on every tool invocation.
+_client: Optional[DatabricksFunctionClient] = None
 
 
-async def _call_function(name: str, args_sql: str) -> str:
-  """Run SELECT <prefix>.<name>(<args>) and return its single string output."""
-  stmt = f'SELECT {TARGET_FN_PREFIX}.{name}({args_sql})'
-  logger.debug('telco tool call: %s', stmt)
-  return await asyncio.to_thread(_execute_sql, stmt)
+def _get_client() -> DatabricksFunctionClient:
+  global _client
+  if _client is None:
+    profile = os.getenv('DATABRICKS_CONFIG_PROFILE')
+    kwargs = {'execution_mode': 'serverless'}
+    if profile:
+      kwargs['profile'] = profile
+    _client = DatabricksFunctionClient(**kwargs)
+  return _client
+
+
+def _execute_sync(fn_name: str, params: dict) -> str:
+  """Run the UC function on serverless and return its first-column value."""
+  client = _get_client()
+  result = client.execute_function(f'{TARGET_FN_PREFIX}.{fn_name}', params)
+  if getattr(result, 'error', None):
+    return f'{{"error": "{result.error}"}}'
+  value = getattr(result, 'value', None)
+  return value or '{}'
+
+
+async def _call_function(fn_name: str, params: dict) -> str:
+  """Async wrapper that executes the UC function in a worker thread."""
+  return await asyncio.to_thread(_execute_sync, fn_name, params)
 
 
 # ---------------------------------------------------------------------------
-# Tool definitions — names and docstrings are how the LLM picks them.
+# Tool definitions — names and docstrings drive the LLM's tool selection.
 # ---------------------------------------------------------------------------
 
 
@@ -63,7 +63,7 @@ async def get_customer_info(customer: str) -> str:
   Args:
     customer: Customer ID like 'CUS-10001'.
   """
-  return await _call_function('get_customer_info', _quote(customer))
+  return await _call_function('get_customer_info', {'customer': customer})
 
 
 @function_tool
@@ -74,7 +74,7 @@ async def customer_subscriptions(customer: str) -> str:
   Args:
     customer: Customer ID like 'CUS-10001'.
   """
-  return await _call_function('customer_subscriptions', _quote(customer))
+  return await _call_function('customer_subscriptions', {'customer': customer})
 
 
 @function_tool
@@ -91,12 +91,12 @@ async def get_billing_info(
     billing_start_date: ISO date 'YYYY-MM-DD' (optional).
     billing_end_date: ISO date 'YYYY-MM-DD' (optional).
   """
-  args = [_quote(customer)]
+  params: dict = {'customer': customer}
   if billing_start_date:
-    args.append(_quote(billing_start_date))
+    params['billing_start_date'] = billing_start_date
   if billing_end_date:
-    args.append(_quote(billing_end_date))
-  return await _call_function('get_billing_info', ', '.join(args))
+    params['billing_end_date'] = billing_end_date
+  return await _call_function('get_billing_info', params)
 
 
 @function_tool
@@ -114,7 +114,11 @@ async def get_usage_info(
   """
   return await _call_function(
     'get_usage_info',
-    ', '.join([_quote(customer), _quote(usage_start_date), _quote(usage_end_date)]),
+    {
+      'customer': customer,
+      'usage_start_date': usage_start_date,
+      'usage_end_date': usage_end_date,
+    },
   )
 
 
@@ -126,7 +130,7 @@ async def get_customer_devices(customer: str) -> str:
   Args:
     customer: Customer ID like 'CUS-10001'.
   """
-  return await _call_function('get_customer_devices', _quote(customer))
+  return await _call_function('get_customer_devices', {'customer': customer})
 
 
 @function_tool
@@ -134,7 +138,7 @@ async def get_devices_info() -> str:
   """List all available device models in the catalog with their specs and features.
   Use this to compare devices or answer questions about supported handsets.
   """
-  return await _call_function('get_devices_info', '')
+  return await _call_function('get_devices_info', {})
 
 
 @function_tool
@@ -142,7 +146,7 @@ async def get_plans_info() -> str:
   """List all available subscription plans (features, prices, benefits).
   Use this for plan-comparison or recommendation questions.
   """
-  return await _call_function('get_plans_info', '')
+  return await _call_function('get_plans_info', {})
 
 
 @function_tool
@@ -150,7 +154,7 @@ async def get_promotions_info() -> str:
   """List current and past promotions (discount type/value, validity period,
   description, active status).
   """
-  return await _call_function('get_promotions_info', '')
+  return await _call_function('get_promotions_info', {})
 
 
 TELCO_TOOLS = [

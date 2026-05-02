@@ -3,13 +3,8 @@ command: [
   "server.app:app"
 ]
 resources:
-  - name: telco-agent-endpoint
-    description: 'Telco support agent serving endpoint'
-    serving_endpoint:
-      name: prod-telco-customer-support-agent
-      permission: CAN_QUERY
   - name: tracing-warehouse
-    description: 'SQL warehouse for UC-backed MLflow tracing'
+    description: 'SQL warehouse for UC tracing + telco UC function calls'
     sql_warehouse:
       id: 75fd8278393d07eb
       permission: CAN_USE
@@ -65,8 +60,14 @@ env:
   - name: 'NOTEBOOK_URL_5_production_monitoring'
     value: 'https://e2-demo-field-eng.cloud.databricks.com/editor/notebooks/1078459371915479'
   # Telco support agent (landing page + first sidebar entry)
-  - name: 'DATABRICKS_ENDPOINT_NAME'
-    value: 'prod-telco-customer-support-agent'
+  # The agent now runs in-process via the OpenAI Agents SDK. It calls UC
+  # functions in main.austin_choi_demo, no separate serving endpoint needed.
+  - name: 'TELCO_MODEL'
+    value: 'databricks-claude-sonnet-4-5'
+  - name: 'TELCO_FUNCTION_PREFIX'
+    value: 'main.austin_choi_demo'
+  - name: 'TELCO_TOOL_WAREHOUSE_ID'
+    value: '75fd8278393d07eb'
   - name: 'TELCO_MLFLOW_EXPERIMENT_ID'
     value: '2049197043893135'
   - name: 'TELCO_MLFLOW_EXPERIMENT_PATH'

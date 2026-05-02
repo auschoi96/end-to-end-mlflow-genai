@@ -18,7 +18,7 @@ from mlflow.entities import AssessmentSource, AssessmentSourceType
 from pydantic import BaseModel, Field
 
 from ..config.telco_settings import TelcoSettings, get_telco_settings
-from ..services.telco_agent_service import TelcoAgentService
+from ..services.telco_orchestrator import stream_telco_response  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -76,13 +76,6 @@ class FeedbackResponse(BaseModel):
   experiment_url: Optional[str] = None
 
 
-def get_agent_service(
-  settings: TelcoSettings = Depends(get_telco_settings),
-) -> TelcoAgentService:
-  """FastAPI dependency for the telco agent service."""
-  return TelcoAgentService(settings)
-
-
 @router.get('/customers', response_model=list[CustomerInfo])
 async def get_demo_customers(settings: TelcoSettings = Depends(get_telco_settings)):
   """Return the demo customer list from env."""
@@ -100,21 +93,46 @@ async def get_demo_customers(settings: TelcoSettings = Depends(get_telco_setting
     raise HTTPException(status_code=500, detail=f'Error retrieving customers: {e}') from e
 
 
+def _history_dicts(messages: list[ChatMessageModel]) -> list[dict]:
+  return [{'role': m.role, 'content': m.content} for m in messages]
+
+
 @router.post('/chat', response_model=AgentResponseModel)
 async def chat(
-  request: ChatRequest, agent_service: TelcoAgentService = Depends(get_agent_service)
+  request: ChatRequest, settings: TelcoSettings = Depends(get_telco_settings)
 ):
-  """Non-streaming chat completion."""
+  """Non-streaming chat completion that drains the in-app orchestrator stream."""
   try:
-    response = await agent_service.send_message(
+    final_response = ''
+    tools_used: list[dict] = []
+    trace_id: str | None = None
+    agent_type: str | None = None
+    async for evt in stream_telco_response(
       message=request.message,
       customer_id=request.customer_id,
-      conversation_history=[
-        # The service expects its own ChatMessage model; convert here.
-        _to_service_message(m) for m in request.conversation_history
-      ],
+      conversation_history=_history_dicts(request.conversation_history),
+      experiment_id=settings.mlflow_experiment_id or None,
+      experiment_path=settings.mlflow_experiment_path,
+    ):
+      if evt.get('type') == 'response_text':
+        final_response = evt.get('text', '')
+      elif evt.get('type') == 'tool_call':
+        tools_used.append(evt)
+      elif evt.get('type') == 'completion':
+        final_response = evt.get('final_response', final_response)
+        trace_id = evt.get('trace_id')
+        agent_type = evt.get('agent_type')
+        tools_used = evt.get('tools_used', tools_used)
+      elif evt.get('type') == 'error':
+        raise HTTPException(status_code=500, detail=evt.get('error', 'agent error'))
+    return AgentResponseModel(
+      response=final_response,
+      agent_type=agent_type,
+      tools_used=tools_used,
+      trace_id=trace_id,
     )
-    return response
+  except HTTPException:
+    raise
   except Exception as e:
     logger.error('Telco chat error: %s', e)
     logger.error(traceback.format_exc())
@@ -123,18 +141,20 @@ async def chat(
 
 @router.post('/chat/stream')
 async def chat_stream(
-  request: ChatRequest, agent_service: TelcoAgentService = Depends(get_agent_service)
+  request: ChatRequest, settings: TelcoSettings = Depends(get_telco_settings)
 ):
   """Streaming chat completion via Server-Sent Events."""
   try:
     async def event_generator():
       try:
-        async for event_data in agent_service.send_message_stream(
+        async for evt in stream_telco_response(
           message=request.message,
           customer_id=request.customer_id,
-          conversation_history=[_to_service_message(m) for m in request.conversation_history],
+          conversation_history=_history_dicts(request.conversation_history),
+          experiment_id=settings.mlflow_experiment_id or None,
+          experiment_path=settings.mlflow_experiment_path,
         ):
-          yield event_data
+          yield f'data: {json.dumps(evt)}\n\n'
       except Exception as e:
         logger.error('Streaming generator error: %s', e)
         logger.error(traceback.format_exc())
@@ -157,17 +177,9 @@ async def chat_stream(
 
 
 @router.get('/health')
-async def agent_health(agent_service: TelcoAgentService = Depends(get_agent_service)):
-  """Probe the model-serving endpoint with a tiny request."""
-  try:
-    is_healthy = await agent_service.health_check()
-    return {
-      'status': 'healthy' if is_healthy else 'unhealthy',
-      'endpoint': agent_service.settings.databricks_endpoint,
-    }
-  except Exception as e:
-    logger.error('Telco health check error: %s', e)
-    return {'status': 'unhealthy', 'endpoint': 'unknown', 'error': str(e)}
+async def agent_health():
+  """Lightweight liveness check for the in-app telco orchestrator."""
+  return {'status': 'healthy', 'mode': 'in-app-agent'}
 
 
 @router.get('/mlflow-experiment')
@@ -233,8 +245,3 @@ async def submit_feedback(
     raise HTTPException(status_code=500, detail=f'Error submitting feedback: {e}') from e
 
 
-def _to_service_message(m: ChatMessageModel):
-  """Convert a route-layer ChatMessageModel into the service-layer ChatMessage."""
-  from ..services.telco_sse import ChatMessage
-
-  return ChatMessage(role=m.role, content=m.content)

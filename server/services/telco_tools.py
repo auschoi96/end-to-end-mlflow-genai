@@ -84,18 +84,22 @@ async def get_billing_info(
   billing_end_date: Optional[str] = None,
 ) -> str:
   """Retrieve billing records (charges, payment status, due dates) for a customer
-  in a date range. If dates are omitted, returns the most recent records.
+  in a date range. If dates are omitted, returns all available billing history.
 
   Args:
     customer: Customer ID like 'CUS-10001'.
-    billing_start_date: ISO date 'YYYY-MM-DD' (optional).
-    billing_end_date: ISO date 'YYYY-MM-DD' (optional).
+    billing_start_date: ISO date 'YYYY-MM-DD' (optional). Defaults to 1900-01-01.
+    billing_end_date: ISO date 'YYYY-MM-DD' (optional). Defaults to 2100-01-01.
   """
-  params: dict = {'customer': customer}
-  if billing_start_date:
-    params['billing_start_date'] = billing_start_date
-  if billing_end_date:
-    params['billing_end_date'] = billing_end_date
+  # The UC function requires all 6 params; sentinels (0.0 / "All") mean "any".
+  params = {
+    'customer': customer,
+    'billing_start_date_input': billing_start_date or '1900-01-01',
+    'billing_end_date_input': billing_end_date or '2100-01-01',
+    'additional_charges_input': 0.0,
+    'total_amount_input': 0.0,
+    'status_input': 'All',
+  }
   return await _call_function('get_billing_info', params)
 
 

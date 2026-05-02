@@ -2,11 +2,24 @@ command: [
   "uvicorn",
   "server.app:app"
 ]
+resources:
+  - name: telco-agent-endpoint
+    description: 'Telco support agent serving endpoint'
+    serving_endpoint:
+      name: prod-telco-customer-support-agent
+      permission: CAN_QUERY
+  - name: tracing-warehouse
+    description: 'SQL warehouse for UC-backed MLflow tracing'
+    sql_warehouse:
+      id: 75fd8278393d07eb
+      permission: CAN_USE
 env:
   - name: 'MLFLOW_TRACKING_URI'
     value: 'databricks'
   - name: 'MLFLOW_EXPERIMENT_ID'
-    value: '3301487308147308'
+    value: '2049197043893135'
+  - name: 'MLFLOW_TRACING_SQL_WAREHOUSE_ID'
+    value: '75fd8278393d07eb'
   - name: 'LOW_ACCURACY_RESULTS_URL'
     value: 'https://e2-demo-field-eng.cloud.databricks.com/ml/experiments/3301487308147308/evaluation-runs?selectedRunUuid=7d9bfc5c929c4d1f8ea10b6a570317dc&compareToRunUuid=816aefcc5d3a4f0ca0739b3f1f569526'
   - name: 'REGRESSION_RESULTS_URL'
@@ -16,9 +29,9 @@ env:
   - name: 'LLM_MODEL'
     value: 'databricks-claude-sonnet-4-6'
   - name: 'UC_CATALOG'
-    value: 'amine_elhelou'
+    value: 'main'
   - name: 'UC_SCHEMA'
-    value: 'mlflow3-demo-nfl-v2'
+    value: 'austin_choi_demo'
   - name: 'MLFLOW_ENABLE_ASYNC_TRACE_LOGGING'
     value: 'false'
   - name: 'PROMPT_NAME'
@@ -55,9 +68,9 @@ env:
   - name: 'DATABRICKS_ENDPOINT_NAME'
     value: 'prod-telco-customer-support-agent'
   - name: 'TELCO_MLFLOW_EXPERIMENT_ID'
-    value: ''
+    value: '2049197043893135'
   - name: 'TELCO_MLFLOW_EXPERIMENT_PATH'
-    value: ''
+    value: '/Users/austin.choi@databricks.com/NFL_dc_assistant_uc'
   - name: 'DEMO_CUSTOMER_IDS'
     value: 'CUS-10001,CUS-10002,CUS-10006,CUS-10023,CUS-10048,CUS-10172,CUS-11081,CUS-10619'
   - name: 'ENV'

@@ -36,6 +36,19 @@ async def lifespan(app: FastAPI):
   # Startup
   logger.info('Starting application...')
 
+  # Configure UC-backed MLflow tracing once at startup so both telco and NFL
+  # request paths emit traces to the same UC schema. Both helpers no-op
+  # cleanly when their required env vars are missing.
+  try:
+    from mlflow_demo.utils.mlflow_helpers import (
+      link_experiment_to_uc_schema,
+      setup_tracing_destination,
+    )
+    link_experiment_to_uc_schema()
+    setup_tracing_destination()
+  except Exception as e:
+    logger.warning('UC tracing setup skipped: %s', e)
+
   logger.info('Application startup complete')
 
   yield

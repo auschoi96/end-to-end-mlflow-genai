@@ -5,8 +5,15 @@ with a Databricks-hosted LLM (default: claude-sonnet-4-5) calling the 8 UC
 functions copied to main.austin_choi_demo as tools. This follows the
 Databricks multi-agent-apps pattern: one Agent runs in the FastAPI process,
 MLflow autolog traces every step.
+
+Tracing pattern matches the NFL agent (mlflow_demo/agent/agent.py): autolog
+is registered at module import time so the patched OpenAI client is the one
+the Agents SDK Runner uses, and the @mlflow.trace decorator wraps a sync
+entry point so the whole agent run nests under one trace. The async event
+streaming is run inside that sync wrapper via asyncio.run.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -29,22 +36,14 @@ from .telco_tools import TELCO_TOOLS
 
 logger = logging.getLogger(__name__)
 
-# Initialize the OpenAI Agents SDK once with Databricks as the default
-# completion backend. mlflow.openai.autolog() captures every LLM call + tool
-# call into the active MLflow experiment.
-_INITIALIZED = False
-
-
-def _init_once() -> None:
-  global _INITIALIZED
-  if _INITIALIZED:
-    return
-  set_default_openai_client(AsyncDatabricksOpenAI())
-  set_default_openai_api('chat_completions')
-  set_trace_processors([])  # let MLflow handle tracing
-  mlflow.openai.autolog()
-  logging.getLogger('mlflow.utils.autologging_utils').setLevel(logging.ERROR)
-  _INITIALIZED = True
+# Initialize at module import time so the OpenAI client used by Agents SDK is
+# the one mlflow.openai.autolog has patched. Doing this lazily caused traces
+# to skip telco runs entirely.
+set_default_openai_client(AsyncDatabricksOpenAI())
+set_default_openai_api('chat_completions')
+set_trace_processors([])  # let MLflow be the only trace processor
+mlflow.openai.autolog()
+logging.getLogger('mlflow.utils.autologging_utils').setLevel(logging.ERROR)
 
 
 SYSTEM_INSTRUCTIONS = """You are the customer support agent for a US telco.
@@ -112,22 +111,15 @@ async def stream_telco_response(
     - response_text(text)
     - completion(final_response, trace_id, agent_type, tools_used, done=True)
     - error(error, done=True)
+
+  The Agents SDK Runner spawns its own asyncio task for the streaming loop;
+  that task runs outside whatever async-generator context we set up here, so
+  any mlflow context manager opened in this generator wouldn't reach the
+  Runner's task. Workaround: run the entire agent in a worker thread inside
+  a @mlflow.trace decorated sync function, then yield the collected events
+  to the SSE consumer.
   """
-  _init_once()
-
-  # Pin the experiment for this request so traces don't cross-pollinate.
-  try:
-    if experiment_id:
-      mlflow.set_experiment(experiment_id=experiment_id)
-    elif experiment_path:
-      mlflow.set_experiment(experiment_path)
-  except Exception as e:
-    logger.warning('telco orchestrator: set_experiment failed: %s', e)
-
   selected_model = model or os.getenv('TELCO_MODEL', 'databricks-claude-sonnet-4-5')
-
-  full_text_parts: list[str] = []
-  tools_used: list[dict[str, Any]] = []
 
   yield {
     'type': 'routing',
@@ -135,22 +127,27 @@ async def stream_telco_response(
     'routing_decision': f'Routed to TelcoSupportAgent ({selected_model})',
   }
 
+  full_text_parts: list[str] = []
+  tools_used: list[dict[str, Any]] = []
+
   try:
-    async for event in _streamed_run(message, customer_id, conversation_history, selected_model):
-      async for shaped in _shape_event(event, full_text_parts, tools_used):
-        yield shaped
+    events, trace_id = await asyncio.to_thread(
+      _run_telco_traced,
+      message,
+      customer_id,
+      conversation_history,
+      selected_model,
+      experiment_id,
+      experiment_path,
+    )
   except Exception as e:
-    logger.exception('telco orchestrator stream failed')
+    logger.exception('telco orchestrator run failed')
     yield {'type': 'error', 'error': str(e), 'done': True}
     return
 
-  # mlflow.openai.autolog and the @mlflow.trace wrapper above produce one or
-  # more traces during the run. Grab the latest one to surface in the UI.
-  trace_id: str | None = None
-  try:
-    trace_id = mlflow.get_last_active_trace_id()
-  except Exception:
-    pass
+  for event in events:
+    async for shaped in _shape_event(event, full_text_parts, tools_used):
+      yield shaped
 
   yield {
     'type': 'completion',
@@ -163,31 +160,75 @@ async def stream_telco_response(
   }
 
 
-@mlflow.trace(name='telco_chat', span_type=SpanType.AGENT)
-async def _streamed_run(
+def _run_telco_traced(
   message: str,
   customer_id: str,
   conversation_history: list[dict[str, str]],
   selected_model: str,
-):
-  """Single-trace wrapper around the Agents SDK streaming run.
+  experiment_id: str | None,
+  experiment_path: str | None,
+) -> tuple[list[Any], str | None]:
+  """Sync entry point that owns the MLflow trace context for one chat turn.
 
-  Decorating an async generator with @mlflow.trace keeps the trace open for
-  the entire stream lifetime so all child OpenAI + tool spans roll up under
-  one parent trace.
+  Runs in a worker thread so the FastAPI event loop stays responsive. Sets
+  the experiment, opens a fresh asyncio loop, drives the Agents SDK Runner
+  to completion, collects every event, and returns (events, trace_id).
   """
+  try:
+    if experiment_id:
+      mlflow.set_experiment(experiment_id=experiment_id)
+    elif experiment_path:
+      mlflow.set_experiment(experiment_path)
+  except Exception as e:
+    logger.warning('telco orchestrator: set_experiment failed: %s', e)
+
+  events = _traced_collect(message, customer_id, conversation_history, selected_model)
+  trace_id = None
+  try:
+    trace_id = mlflow.get_last_active_trace_id()
+  except Exception:
+    pass
+  return events, trace_id
+
+
+@mlflow.trace(name='telco_chat', span_type=SpanType.AGENT)
+def _traced_collect(
+  message: str,
+  customer_id: str,
+  conversation_history: list[dict[str, str]],
+  selected_model: str,
+) -> list[Any]:
+  """Drive the Agents SDK to completion under one MLflow trace span."""
   mlflow.update_current_trace(
-    metadata={
-      'mlflow.trace.session': customer_id,
-      'customer_id': customer_id,
-    },
+    metadata={'mlflow.trace.session': customer_id, 'customer_id': customer_id},
     request_preview=message,
   )
-  agent = _build_agent(selected_model)
-  conv = _format_history(conversation_history, message, customer_id)
-  result = Runner.run_streamed(agent, input=conv)
-  async for event in result.stream_events():
-    yield event
+
+  async def _drain() -> list[Any]:
+    agent = _build_agent(selected_model)
+    conv = _format_history(conversation_history, message, customer_id)
+    result = Runner.run_streamed(agent, input=conv)
+    collected: list[Any] = []
+    async for event in result.stream_events():
+      collected.append(event)
+    return collected
+
+  events = asyncio.run(_drain())
+  # Surface the assistant's final text as the trace's response preview so
+  # the experiment list shows useful summaries.
+  final_text = ''
+  for event in events:
+    if getattr(event, 'type', None) == 'raw_response_event':
+      data = getattr(event, 'data', None)
+      raw = data.model_dump() if data is not None and hasattr(data, 'model_dump') else None
+      if raw and raw.get('type') == 'response.output_text.delta':
+        final_text += raw.get('delta') or ''
+  if final_text:
+    try:
+      mlflow.update_current_trace(response_preview=final_text)
+    except Exception:
+      pass
+  return events
 
 
 async def _shape_event(event: Any, text_parts: list[str], tools_used: list[dict[str, Any]]):

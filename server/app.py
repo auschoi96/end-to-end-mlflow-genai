@@ -108,6 +108,7 @@ class PreloadedResults(BaseModel):
   sample_review_app_url: str
   sample_labeling_trace_id: str | None = None
   sample_labeling_trace_url: str
+  label_schemas_url: str
 
 
 def ensure_https_protocol(host: str | None) -> str:
@@ -181,6 +182,11 @@ async def get_preloaded_results() -> PreloadedResults:
   sample_trace_id = os.getenv('SAMPLE_TRACE_ID')
   sample_labeling_trace_id = os.getenv('SAMPLE_LABELING_TRACE_ID')
 
+  workspace_id = os.getenv('DATABRICKS_WORKSPACE_ID')
+  schemas_params = [f'o={workspace_id}'] if workspace_id else []
+  schemas_query = f'?{"&".join(schemas_params)}' if schemas_params else ''
+  label_schemas_url = f'{databricks_host}/ml/experiments/{experiment_id}/label-schemas{schemas_query}'
+
   return PreloadedResults(
     low_accuracy_results_url=os.getenv('LOW_ACCURACY_RESULTS_URL'),
     regression_results_url=os.getenv('REGRESSION_RESULTS_URL'),
@@ -190,6 +196,7 @@ async def get_preloaded_results() -> PreloadedResults:
     sample_review_app_url=os.getenv('SAMPLE_REVIEW_APP_URL') or '',
     sample_labeling_trace_id=sample_labeling_trace_id,
     sample_labeling_trace_url=build_trace_url(sample_labeling_trace_id),
+    label_schemas_url=label_schemas_url,
   )
 
 

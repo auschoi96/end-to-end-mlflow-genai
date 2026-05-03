@@ -152,31 +152,15 @@ def setup_authentication():
         return WorkspaceClient()
 
     # Use default credential chain (reads env vars automatically)
-    w = WorkspaceClient()
-
-    # Extract a bearer token from the workspace client so that MLflow tracking
-    # can authenticate via the simpler HTTPS+token path instead of the 'databricks'
-    # tracking URI which has known credential resolution issues in Apps environments.
-    try:
-        headers = w.config.authenticate()
-        bearer = headers.get("Authorization", "")
-        if bearer.startswith("Bearer "):
-            token = bearer[7:]
-            host = os.environ.get("DATABRICKS_HOST", "")
-            if not host.startswith("http"):
-                host = f"https://{host}"
-            # Switch MLflow tracking from 'databricks' scheme to direct HTTPS+token.
-            # This uses RestStore (simple token auth) instead of DatabricksTracingRestStore
-            # which has a complex credential resolution that fails in Apps.
-            os.environ["MLFLOW_TRACKING_URI"] = host
-            os.environ["MLFLOW_TRACKING_TOKEN"] = token
-            mlflow.set_tracking_uri(host)
-    except Exception as e:
-        print(f"Warning: Could not configure MLflow tracking URI: {e}")
-
-    return w
+    return WorkspaceClient()
 
 WORKSPACE_CLIENT = setup_authentication()
+
+# Force MLflow tracking through DatabricksTracingRestStore so traces honor
+# the experiment's databricksTraceDestinationPath UC tag. Without this, MLflow
+# silently falls back to legacy DBFS trace storage.
+mlflow.set_tracking_uri("databricks")
+print(f"[agent.py] MLflow tracking URI: {mlflow.get_tracking_uri()}")
 
 # Configure MLflow to use Unity Catalog registry
 mlflow.set_registry_uri("databricks-uc")

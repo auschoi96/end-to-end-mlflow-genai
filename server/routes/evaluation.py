@@ -214,21 +214,19 @@ async def run_session_evaluation(request: RunSessionEvalRequest):
 
       yield f'data: {json.dumps({"type": "progress", "message": f"Loaded {len(trace_ids)} traces from dataset"})}\n\n'
 
-      # Load actual trace objects with session metadata
-      filter_str = 'metadata.`mlflow.trace.session` != ""'
-      all_traces = mlflow.search_traces(
-        locations=[exp_id],
-        filter_string=filter_str,
-        return_type='list',
-        max_results=100,
-      )
-
-      # Filter to only traces in our dataset
-      dataset_traces = [t for t in all_traces if t.info.request_id in trace_ids]
-      logger.info(f'Matched {len(dataset_traces)} traces from experiment')
+      # Load each dataset trace directly by ID — avoids brittle search/filter and max_results caps.
+      dataset_traces = []
+      for tid in trace_ids:
+        try:
+          trace = mlflow.get_trace(tid)
+          if trace is not None:
+            dataset_traces.append(trace)
+        except Exception as e:
+          logger.warning(f'Could not load trace {tid}: {e}')
+      logger.info(f'Loaded {len(dataset_traces)} traces from dataset IDs')
 
       if not dataset_traces:
-        yield f'data: {json.dumps({"type": "error", "error": "No matching traces found in experiment"})}\n\n'
+        yield f'data: {json.dumps({"type": "error", "error": "No traces could be loaded from dataset IDs"})}\n\n'
         return
 
       # Count sessions

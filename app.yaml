@@ -23,14 +23,14 @@ env:
     value: 'placeholder-metrics-url'
   - name: 'LLM_MODEL'
     value: 'databricks-claude-sonnet-4-6'
-  # UC_CATALOG/UC_SCHEMA scope NFL agent prompts and UC tools. The prompt
-  # `dc_assistant_system_prompt@production` lives in amine_elhelou.mlflow3-demo-nfl-v2,
-  # so NFL's settings stay there. Telco UC functions live in main.austin_choi_demo
-  # and are addressed separately via TELCO_FUNCTION_PREFIX.
+  # UC_CATALOG/UC_SCHEMA scope NFL agent prompts and UC tools. NFL data
+  # (football_pbp_data, 7 UC functions, dc_assistant_system_prompt) lives
+  # in users.austin_choi in this workspace. Telco UC functions live in
+  # main.austin_choi_demo and are addressed separately via TELCO_FUNCTION_PREFIX.
   - name: 'UC_CATALOG'
-    value: 'amine_elhelou'
+    value: 'users'
   - name: 'UC_SCHEMA'
-    value: 'mlflow3-demo-nfl-v2'
+    value: 'austin_choi'
   - name: 'MLFLOW_ENABLE_ASYNC_TRACE_LOGGING'
     value: 'false'
   - name: 'PROMPT_NAME'

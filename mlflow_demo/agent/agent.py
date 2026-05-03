@@ -249,6 +249,33 @@ for tool_spec in uc_toolkit.tools:
 # # See https://docs.databricks.com/generative-ai/agent-framework/unstructured-retrieval-tools.html
 
 
+def _merge_parallel_tool_calls(chat_msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse consecutive assistant tool-call messages into a single one.
+
+    `mlflow.types.responses.to_chat_completions_input` emits one
+    `assistant {tool_calls: [...]}` per `function_call` item. When the LLM
+    emits parallel tool calls (multiple tool_use blocks in one response),
+    that produces back-to-back assistant messages — which Claude rejects
+    on the next round-trip with "tool_use ids were found without
+    tool_result blocks immediately after". Merge them so the on-the-wire
+    conversation stays valid.
+    """
+    merged: list[dict[str, Any]] = []
+    for msg in chat_msgs:
+        if (
+            merged
+            and msg.get("role") == "assistant"
+            and merged[-1].get("role") == "assistant"
+            and msg.get("tool_calls")
+            and merged[-1].get("tool_calls")
+        ):
+            merged[-1] = dict(merged[-1])
+            merged[-1]["tool_calls"] = [*merged[-1]["tool_calls"], *msg["tool_calls"]]
+            continue
+        merged.append(msg)
+    return merged
+
+
 def _safe_parse_tool_arguments(raw_args: Any) -> dict:
     """Parse tool call arguments robustly.
     - Accepts dict (returns as-is) or JSON string.
@@ -354,7 +381,7 @@ class ToolCallingAgent(ResponsesAgent):
             warnings.filterwarnings("ignore", message="PydanticSerializationUnexpectedValue")
             for chunk in self.model_serving_client.chat.completions.create(
                 model=self.llm_endpoint,
-                messages=to_chat_completions_input(messages),
+                messages=_merge_parallel_tool_calls(to_chat_completions_input(messages)),
                 tools=self.get_tool_specs(),
                 stream=True,
             ):

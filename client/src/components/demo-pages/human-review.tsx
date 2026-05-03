@@ -27,7 +27,7 @@ You've aligned judges, optimized prompts, and collected expert labels. Now you n
 
 MLflow 3 lets you **register scorers directly to an experiment** and run them automatically against production traces with configurable sampling rates. Assessments are attached to the traces they evaluate — everything lives in one place.
 
-Separately, you can **export traces to Unity Catalog** (Public Preview) by linking an experiment to a UC schema via **set_experiment_trace_location()**. This creates three OpenTelemetry-format Delta tables (spans, logs, metrics) in your schema — in our case under **nethra_ranganathan.mlflow_dc_2**. Once linked, every trace and scorer assessment is SQL-queryable, ideal for dashboards, trend analysis, and feeding low-scoring traces back into labeling sessions.
+Separately, you can **export traces to Unity Catalog** (Public Preview) by linking an experiment to a UC schema via **set_experiment_trace_location()**. This creates three OpenTelemetry-format Delta tables (spans, logs, metrics) in your schema — in our case under **users.austin_choi**. Once linked, every trace and scorer assessment is SQL-queryable, ideal for dashboards, trend analysis, and feeding low-scoring traces back into labeling sessions.
 
 ## The Monitoring Loop
 1. **Register & start scorers** with sampling rates (safety at 100%, expensive judges at 5-20%)
@@ -48,8 +48,8 @@ from mlflow.genai.scorer_utils import ScorerSamplingConfig
 #    Creates 3 OTEL Delta tables: spans, logs, metrics
 set_experiment_trace_location(
     location=UCSchemaLocation(
-        catalog_name="nethra_ranganathan",
-        schema_name="mlflow_dc_2"
+        catalog_name="users",
+        schema_name="austin_choi"
     ),
     experiment_id=EXPERIMENT_ID,
 )
@@ -102,7 +102,7 @@ const queryTraceTableCode = `# Query the OTEL trace tables in Unity Catalog
 #   - mlflow_experiment_trace_otel_logs
 #   - mlflow_experiment_trace_otel_metrics
 
-UC_SCHEMA = "nethra_ranganathan.mlflow_dc_2"
+UC_SCHEMA = "users.austin_choi"
 
 # Trace volume over the last 30 days
 trace_trends = spark.sql(f"""

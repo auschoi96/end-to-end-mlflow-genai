@@ -221,9 +221,12 @@ def create_tool_info(tool_spec, exec_fn_param: Optional[Callable] = None):
     udf_name = tool_name.replace("__", ".")
 
     # Define a wrapper that accepts kwargs for the UC tool call,
-    # then passes them to the UC tool execution client
+    # then passes them to the UC tool execution client. Drop None-valued
+    # entries so the LLM passing `null` for an optional param falls through
+    # to the function's DEFAULT instead of erroring with a type mismatch.
     def exec_fn(**kwargs):
-        function_result = uc_function_client.execute_function(udf_name, kwargs)
+        cleaned = {k: v for k, v in kwargs.items() if v is not None}
+        function_result = uc_function_client.execute_function(udf_name, cleaned)
         if function_result.error is not None:
             return function_result.error
         else:

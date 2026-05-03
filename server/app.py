@@ -15,7 +15,7 @@ from mlflow_demo.utils.mlflow_helpers import get_mlflow_experiment_id
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
-from .routes import dc_assistant, evaluation, helper, telco
+from .routes import dc_assistant, evaluation, helper, optimization, telco
 
 # Configure logging for Databricks Apps monitoring
 # Logs written to stdout/stderr will be available in Databricks Apps UI and /logz endpoint
@@ -81,6 +81,7 @@ API_PREFIX = '/api'
 app.include_router(dc_assistant.router)
 app.include_router(evaluation.router)
 app.include_router(helper.router)
+app.include_router(optimization.router)
 app.include_router(telco.router)
 
 
@@ -109,6 +110,7 @@ class PreloadedResults(BaseModel):
   sample_labeling_trace_id: str | None = None
   sample_labeling_trace_url: str
   label_schemas_url: str
+  prompt_registry_url: str
 
 
 def ensure_https_protocol(host: str | None) -> str:
@@ -187,6 +189,12 @@ async def get_preloaded_results() -> PreloadedResults:
   schemas_query = f'?{"&".join(schemas_params)}' if schemas_params else ''
   label_schemas_url = f'{databricks_host}/ml/experiments/{experiment_id}/label-schemas{schemas_query}'
 
+  uc_catalog = os.getenv('UC_CATALOG', '')
+  uc_schema = os.getenv('UC_SCHEMA', '')
+  prompt_short = os.getenv('PROMPT_NAME', 'dc_assistant_system_prompt')
+  prompt_full = prompt_short if '.' in prompt_short else f'{uc_catalog}.{uc_schema}.{prompt_short}'
+  prompt_registry_url = f'{databricks_host}/ml/prompts/{prompt_full}'
+
   return PreloadedResults(
     low_accuracy_results_url=os.getenv('LOW_ACCURACY_RESULTS_URL'),
     regression_results_url=os.getenv('REGRESSION_RESULTS_URL'),
@@ -197,6 +205,7 @@ async def get_preloaded_results() -> PreloadedResults:
     sample_labeling_trace_id=sample_labeling_trace_id,
     sample_labeling_trace_url=build_trace_url(sample_labeling_trace_id),
     label_schemas_url=label_schemas_url,
+    prompt_registry_url=prompt_registry_url,
   )
 
 

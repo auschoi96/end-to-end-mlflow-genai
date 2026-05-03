@@ -388,7 +388,18 @@ class ToolCallingAgent(ResponsesAgent):
             if last_msg.get("role", None) == "assistant":
                 return
             elif last_msg.get("type", None) == "function_call":
-                yield self.handle_tool_call(last_msg, messages)
+                # When the LLM emits parallel tool calls, the aggregator
+                # appends multiple consecutive function_call items. Process
+                # ALL of them before calling the LLM again so each tool_use
+                # has its tool_result, otherwise Claude rejects the next
+                # request with "tool_use ids were found without tool_result
+                # blocks immediately after".
+                idx = len(messages)
+                while idx > 0 and messages[idx - 1].get("type") == "function_call":
+                    idx -= 1
+                pending_calls = list(messages[idx:])
+                for tool_call in pending_calls:
+                    yield self.handle_tool_call(tool_call, messages)
             else:
                 yield from output_to_responses_items_stream(
                     chunks=self.call_llm(messages), aggregator=messages

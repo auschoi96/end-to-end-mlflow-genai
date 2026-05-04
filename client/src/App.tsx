@@ -48,6 +48,7 @@ import { PromptTesting } from "@/components/demo-pages/find-fix-quality-issues";
 import { JudgeAlignment } from "@/components/demo-pages/business-metrics";
 import { MonitoringDemo } from "@/components/demo-pages/prod-monitoring";
 import { HumanReview } from "@/components/demo-pages/human-review";
+import { TelcoAssistant } from "@/components/telco/TelcoAssistant";
 import { ViewType, getViewTypeFromPath, getPathFromViewType } from "@/routes";
 
 const queryClient = new QueryClient();
@@ -122,6 +123,14 @@ export function Chat() {
         <main className="flex-1 flex items-center justify-center p-4">
           <Routes>
             <Route
+              path="/"
+              element={
+                <div className="w-full h-full">
+                  <TelcoAssistant />
+                </div>
+              }
+            />
+            <Route
               path="/dc-assistant"
               element={
                 <div className="w-full h-full">
@@ -130,7 +139,7 @@ export function Chat() {
               }
             />
             <Route
-              path="/"
+              path="/overview"
               element={
                 <div className="w-full h-full">
                   <DemoOverview />

@@ -18,8 +18,10 @@ import {
   Loader2,
   Zap,
   Target,
+  ExternalLink,
 } from "lucide-react";
 import ReactDiffViewer from "react-diff-viewer";
+import { useQueryPreloadedResults } from "@/queries/useQueryPreloadedResults";
 
 const introContent = `
 # Automatically Optimize Prompts with GEPA
@@ -190,14 +192,29 @@ export function MonitoringDemo() {
   const [optimizationProgress, setOptimizationProgress] = React.useState(0);
   const [currentIteration, setCurrentIteration] = React.useState(0);
   const [viewMode, setViewMode] = React.useState<"side-by-side" | "diff">("side-by-side");
+  const [liveResult, setLiveResult] = React.useState<{
+    initial_score: number;
+    final_score: number;
+    improved: boolean;
+    registered_version: number | null;
+    prompt_name: string;
+    optimized_template_preview: string;
+  } | null>(null);
+  const [optimizationError, setOptimizationError] = React.useState<string | null>(null);
+  const [optimizationMessage, setOptimizationMessage] = React.useState("");
 
-  const runOptimization = () => {
+  const { data: preloadedResultsData, isLoading: isPreloadedResultsLoading } =
+    useQueryPreloadedResults();
+  const promptRegistryUrl = preloadedResultsData?.prompt_registry_url;
+
+  const viewPreRunResults = () => {
     setIsOptimizing(true);
     setHasOptimized(false);
     setOptimizationProgress(0);
     setCurrentIteration(0);
+    setLiveResult(null);
+    setOptimizationError(null);
 
-    // Simulate GEPA optimization progress
     let iteration = 0;
     const progressInterval = setInterval(() => {
       setOptimizationProgress((prev) => {
@@ -208,14 +225,12 @@ export function MonitoringDemo() {
         return prev + 5;
       });
 
-      // Update iteration every 20%
       if (optimizationProgress % 20 === 0 && iteration < 5) {
         iteration += 1;
         setCurrentIteration(iteration);
       }
     }, 400);
 
-    // Complete after ~8 seconds
     setTimeout(() => {
       clearInterval(progressInterval);
       setOptimizationProgress(100);
@@ -223,6 +238,71 @@ export function MonitoringDemo() {
       setIsOptimizing(false);
       setHasOptimized(true);
     }, 8000);
+  };
+
+  const runOptimizationLive = async () => {
+    setIsOptimizing(true);
+    setHasOptimized(false);
+    setOptimizationProgress(0);
+    setLiveResult(null);
+    setOptimizationError(null);
+    setOptimizationMessage("Starting lightweight GEPA optimization...");
+
+    // Frontend-side progress fill while backend runs (caps at 85%, then waits for "done")
+    const progressInterval = setInterval(() => {
+      setOptimizationProgress((prev) => (prev >= 85 ? prev : prev + 1));
+    }, 2000);
+
+    try {
+      const response = await fetch("/api/optimization/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error("No response body");
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value);
+        for (const line of chunk.split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (typeof data.percent === "number") setOptimizationProgress(data.percent);
+            if (data.message) setOptimizationMessage(data.message);
+            if (data.type === "done") {
+              clearInterval(progressInterval);
+              setOptimizationProgress(100);
+              setLiveResult({
+                initial_score: data.initial_score,
+                final_score: data.final_score,
+                improved: data.improved,
+                registered_version: data.registered_version,
+                prompt_name: data.prompt_name,
+                optimized_template_preview: data.optimized_template_preview,
+              });
+              setIsOptimizing(false);
+              setHasOptimized(true);
+            } else if (data.type === "error") {
+              clearInterval(progressInterval);
+              setOptimizationError(data.error);
+              setIsOptimizing(false);
+            }
+          } catch (e) {
+            console.error("Failed to parse SSE:", e);
+          }
+        }
+      }
+    } catch (err: any) {
+      clearInterval(progressInterval);
+      setOptimizationError(err.message || "Optimization failed");
+      setIsOptimizing(false);
+    }
   };
 
   const introSection = <MarkdownContent content={introContent} />;
@@ -280,44 +360,84 @@ export function MonitoringDemo() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Simulate the optimization: GEPA generates candidate prompts, scores each with your aligned judges, and selects the best performer.
+          <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded px-3 py-2">
+            Running GEPA live takes a few minutes and writes a new prompt version to the registry if the score improves. For demos, use the pre-run results.
           </p>
 
-          <Button
-            onClick={runOptimization}
-            disabled={isOptimizing}
-            size="lg"
-            className="w-full"
-          >
-            {isOptimizing ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Running GEPA Optimization... (Iteration {currentIteration}/5)
-              </>
-            ) : hasOptimized ? (
-              <>
-                <CheckCircle2 className="h-4 w-4 mr-2" />
-                Optimization Complete - Run Again
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4 mr-2" />
-                Run GEPA Optimization
-              </>
-            )}
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Button
+              variant="open_mlflow_ui"
+              size="lg"
+              className="flex-1"
+              disabled={isOptimizing}
+              onClick={() => {
+                viewPreRunResults();
+                if (promptRegistryUrl) window.open(promptRegistryUrl, "_blank");
+              }}
+            >
+              <ExternalLink className="h-4 w-4 mr-2" />
+              View Pre-run Results
+            </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              className="flex-1"
+              disabled={isOptimizing}
+              onClick={runOptimizationLive}
+            >
+              {isOptimizing && liveResult === null && currentIteration === 0 ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Running GEPA Live...
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4 mr-2" />
+                  Run GEPA Optimization Live
+                </>
+              )}
+            </Button>
+          </div>
 
           {isOptimizing && (
             <div className="space-y-2">
               <Progress value={optimizationProgress} className="w-full" />
               <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-2">
                 <Activity className="h-3 w-3 animate-pulse" />
-                {optimizationProgress < 30 && "Generating candidate prompts..."}
-                {optimizationProgress >= 30 && optimizationProgress < 70 && "Testing candidates with aligned judges..."}
-                {optimizationProgress >= 70 && optimizationProgress < 100 && "Refining top performers..."}
-                {optimizationProgress === 100 && "Selecting best prompt!"}
+                {liveResult === null && optimizationMessage
+                  ? optimizationMessage
+                  : (
+                    <>
+                      {optimizationProgress < 30 && "Generating candidate prompts..."}
+                      {optimizationProgress >= 30 && optimizationProgress < 70 && "Testing candidates with aligned judges..."}
+                      {optimizationProgress >= 70 && optimizationProgress < 100 && "Refining top performers..."}
+                      {optimizationProgress === 100 && "Selecting best prompt!"}
+                    </>
+                  )}
               </p>
+            </div>
+          )}
+
+          {optimizationError && (
+            <p className="text-sm text-red-600">{optimizationError}</p>
+          )}
+
+          {liveResult && (
+            <div className="rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20 p-3 space-y-1">
+              <p className="text-sm font-semibold text-green-700 dark:text-green-300 flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4" />
+                Live GEPA run complete
+              </p>
+              <p className="text-xs">
+                Score: {liveResult.initial_score.toFixed(3)} → {liveResult.final_score.toFixed(3)}{" "}
+                {liveResult.improved ? "(improved)" : "(no improvement, prompt not registered)"}
+              </p>
+              {liveResult.registered_version !== null && (
+                <p className="text-xs">
+                  Registered <code>{liveResult.prompt_name}</code> version{" "}
+                  <strong>{liveResult.registered_version}</strong>
+                </p>
+              )}
             </div>
           )}
         </CardContent>

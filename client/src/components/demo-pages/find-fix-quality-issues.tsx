@@ -175,9 +175,8 @@ export function PromptTesting() {
   const { data: preloadedResultsData, isLoading: isPreloadedResultsLoading } =
     useQueryPreloadedResults();
   const preloadedReviewAppUrl = preloadedResultsData?.sample_review_app_url;
-
-  const judgeAssessmentTraceUrl = "https://e2-demo-field-eng.cloud.databricks.com/ml/experiments/1879320556980726/traces?o=1444828305810485&sqlWarehouseId=862f1d757f0424f7&selectedEvaluationId=tr-77922f4435e77a874ce9bd825fe8ea5b";
-  const labelSchemasUrl = "https://e2-demo-field-eng.cloud.databricks.com/ml/experiments/1879320556980726/label-schemas?o=1444828305810485";
+  const judgeAssessmentTraceUrl = preloadedResultsData?.sample_trace_url;
+  const labelSchemasUrl = preloadedResultsData?.label_schemas_url;
 
   const introSection = <MarkdownContent content={introContent} />;
 
@@ -236,7 +235,9 @@ export function PromptTesting() {
             <Button
               variant="open_mlflow_ui"
               size="lg"
+              disabled={isPreloadedResultsLoading || !judgeAssessmentTraceUrl}
               onClick={() =>
+                judgeAssessmentTraceUrl &&
                 window.open(judgeAssessmentTraceUrl, "_blank")
               }
             >
@@ -258,7 +259,9 @@ export function PromptTesting() {
             <Button
               variant="open_mlflow_ui"
               size="lg"
+              disabled={isPreloadedResultsLoading || !labelSchemasUrl}
               onClick={() =>
+                labelSchemasUrl &&
                 window.open(labelSchemasUrl, "_blank")
               }
             >

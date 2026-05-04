@@ -152,31 +152,15 @@ def setup_authentication():
         return WorkspaceClient()
 
     # Use default credential chain (reads env vars automatically)
-    w = WorkspaceClient()
-
-    # Extract a bearer token from the workspace client so that MLflow tracking
-    # can authenticate via the simpler HTTPS+token path instead of the 'databricks'
-    # tracking URI which has known credential resolution issues in Apps environments.
-    try:
-        headers = w.config.authenticate()
-        bearer = headers.get("Authorization", "")
-        if bearer.startswith("Bearer "):
-            token = bearer[7:]
-            host = os.environ.get("DATABRICKS_HOST", "")
-            if not host.startswith("http"):
-                host = f"https://{host}"
-            # Switch MLflow tracking from 'databricks' scheme to direct HTTPS+token.
-            # This uses RestStore (simple token auth) instead of DatabricksTracingRestStore
-            # which has a complex credential resolution that fails in Apps.
-            os.environ["MLFLOW_TRACKING_URI"] = host
-            os.environ["MLFLOW_TRACKING_TOKEN"] = token
-            mlflow.set_tracking_uri(host)
-    except Exception as e:
-        print(f"Warning: Could not configure MLflow tracking URI: {e}")
-
-    return w
+    return WorkspaceClient()
 
 WORKSPACE_CLIENT = setup_authentication()
+
+# Force MLflow tracking through DatabricksTracingRestStore so traces honor
+# the experiment's databricksTraceDestinationPath UC tag. Without this, MLflow
+# silently falls back to legacy DBFS trace storage.
+mlflow.set_tracking_uri("databricks")
+print(f"[agent.py] MLflow tracking URI: {mlflow.get_tracking_uri()}")
 
 # Configure MLflow to use Unity Catalog registry
 mlflow.set_registry_uri("databricks-uc")
@@ -221,9 +205,12 @@ def create_tool_info(tool_spec, exec_fn_param: Optional[Callable] = None):
     udf_name = tool_name.replace("__", ".")
 
     # Define a wrapper that accepts kwargs for the UC tool call,
-    # then passes them to the UC tool execution client
+    # then passes them to the UC tool execution client. Drop None-valued
+    # entries so the LLM passing `null` for an optional param falls through
+    # to the function's DEFAULT instead of erroring with a type mismatch.
     def exec_fn(**kwargs):
-        function_result = uc_function_client.execute_function(udf_name, kwargs)
+        cleaned = {k: v for k, v in kwargs.items() if v is not None}
+        function_result = uc_function_client.execute_function(udf_name, cleaned)
         if function_result.error is not None:
             return function_result.error
         else:
@@ -244,6 +231,33 @@ for tool_spec in uc_toolkit.tools:
 
 # # (Optional) Use Databricks vector search indexes as tools
 # # See https://docs.databricks.com/generative-ai/agent-framework/unstructured-retrieval-tools.html
+
+
+def _merge_parallel_tool_calls(chat_msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse consecutive assistant tool-call messages into a single one.
+
+    `mlflow.types.responses.to_chat_completions_input` emits one
+    `assistant {tool_calls: [...]}` per `function_call` item. When the LLM
+    emits parallel tool calls (multiple tool_use blocks in one response),
+    that produces back-to-back assistant messages — which Claude rejects
+    on the next round-trip with "tool_use ids were found without
+    tool_result blocks immediately after". Merge them so the on-the-wire
+    conversation stays valid.
+    """
+    merged: list[dict[str, Any]] = []
+    for msg in chat_msgs:
+        if (
+            merged
+            and msg.get("role") == "assistant"
+            and merged[-1].get("role") == "assistant"
+            and msg.get("tool_calls")
+            and merged[-1].get("tool_calls")
+        ):
+            merged[-1] = dict(merged[-1])
+            merged[-1]["tool_calls"] = [*merged[-1]["tool_calls"], *msg["tool_calls"]]
+            continue
+        merged.append(msg)
+    return merged
 
 
 def _safe_parse_tool_arguments(raw_args: Any) -> dict:
@@ -351,7 +365,7 @@ class ToolCallingAgent(ResponsesAgent):
             warnings.filterwarnings("ignore", message="PydanticSerializationUnexpectedValue")
             for chunk in self.model_serving_client.chat.completions.create(
                 model=self.llm_endpoint,
-                messages=to_chat_completions_input(messages),
+                messages=_merge_parallel_tool_calls(to_chat_completions_input(messages)),
                 tools=self.get_tool_specs(),
                 stream=True,
             ):
@@ -385,7 +399,18 @@ class ToolCallingAgent(ResponsesAgent):
             if last_msg.get("role", None) == "assistant":
                 return
             elif last_msg.get("type", None) == "function_call":
-                yield self.handle_tool_call(last_msg, messages)
+                # When the LLM emits parallel tool calls, the aggregator
+                # appends multiple consecutive function_call items. Process
+                # ALL of them before calling the LLM again so each tool_use
+                # has its tool_result, otherwise Claude rejects the next
+                # request with "tool_use ids were found without tool_result
+                # blocks immediately after".
+                idx = len(messages)
+                while idx > 0 and messages[idx - 1].get("type") == "function_call":
+                    idx -= 1
+                pending_calls = list(messages[idx:])
+                for tool_call in pending_calls:
+                    yield self.handle_tool_call(tool_call, messages)
             else:
                 yield from output_to_responses_items_stream(
                     chunks=self.call_llm(messages), aggregator=messages

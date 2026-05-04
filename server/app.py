@@ -15,7 +15,7 @@ from mlflow_demo.utils.mlflow_helpers import get_mlflow_experiment_id
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
-from .routes import dc_assistant, evaluation, helper
+from .routes import dc_assistant, evaluation, helper, optimization, telco
 
 # Configure logging for Databricks Apps monitoring
 # Logs written to stdout/stderr will be available in Databricks Apps UI and /logz endpoint
@@ -35,6 +35,13 @@ async def lifespan(app: FastAPI):
   """Manage application lifespan events."""
   # Startup
   logger.info('Starting application...')
+
+  # Don't call mlflow.tracing.set_destination at app startup. The experiment
+  # is already linked to a specific UC trace table via its
+  # databricksTraceDestinationPath tag; setting a process-global schema-level
+  # destination overrides that link and routes traces to a non-existent
+  # mlflow_experiment_trace_otel_spans table. Per-request mlflow.set_experiment
+  # is enough — MLflow resolves the right destination from the experiment.
 
   logger.info('Application startup complete')
 
@@ -74,6 +81,8 @@ API_PREFIX = '/api'
 app.include_router(dc_assistant.router)
 app.include_router(evaluation.router)
 app.include_router(helper.router)
+app.include_router(optimization.router)
+app.include_router(telco.router)
 
 
 # Common/shared models
@@ -100,6 +109,8 @@ class PreloadedResults(BaseModel):
   sample_review_app_url: str
   sample_labeling_trace_id: str | None = None
   sample_labeling_trace_url: str
+  label_schemas_url: str
+  prompt_registry_url: str
 
 
 def ensure_https_protocol(host: str | None) -> str:
@@ -173,6 +184,17 @@ async def get_preloaded_results() -> PreloadedResults:
   sample_trace_id = os.getenv('SAMPLE_TRACE_ID')
   sample_labeling_trace_id = os.getenv('SAMPLE_LABELING_TRACE_ID')
 
+  workspace_id = os.getenv('DATABRICKS_WORKSPACE_ID')
+  schemas_params = [f'o={workspace_id}'] if workspace_id else []
+  schemas_query = f'?{"&".join(schemas_params)}' if schemas_params else ''
+  label_schemas_url = f'{databricks_host}/ml/experiments/{experiment_id}/label-schemas{schemas_query}'
+
+  uc_catalog = os.getenv('UC_CATALOG', '')
+  uc_schema = os.getenv('UC_SCHEMA', '')
+  prompt_short = os.getenv('PROMPT_NAME', 'dc_assistant_system_prompt')
+  prompt_full = prompt_short if '.' in prompt_short else f'{uc_catalog}.{uc_schema}.{prompt_short}'
+  prompt_registry_url = f'{databricks_host}/ml/prompts/{prompt_full}'
+
   return PreloadedResults(
     low_accuracy_results_url=os.getenv('LOW_ACCURACY_RESULTS_URL'),
     regression_results_url=os.getenv('REGRESSION_RESULTS_URL'),
@@ -182,6 +204,8 @@ async def get_preloaded_results() -> PreloadedResults:
     sample_review_app_url=os.getenv('SAMPLE_REVIEW_APP_URL') or '',
     sample_labeling_trace_id=sample_labeling_trace_id,
     sample_labeling_trace_url=build_trace_url(sample_labeling_trace_id),
+    label_schemas_url=label_schemas_url,
+    prompt_registry_url=prompt_registry_url,
   )
 
 

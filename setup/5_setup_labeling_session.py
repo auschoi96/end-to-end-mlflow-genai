@@ -118,8 +118,8 @@ def add_traces_to_session(session):
   Uses the MLflow client API (not the legacy REST API) to link traces to the
   labeling session's run, which supports UC-stored traces.
   """
-  # Normally, you would query for the relevant traces, here we just grab 3.
-  traces = mlflow.search_traces(max_results=3)
+  # Normally, you would query for the relevant traces, here we just grab 10.
+  traces = mlflow.search_traces(max_results=10)
 
   if traces.empty:
     print('No traces found to add to session.')

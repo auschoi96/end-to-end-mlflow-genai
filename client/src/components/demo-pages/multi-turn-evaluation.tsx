@@ -46,11 +46,29 @@ export function MultiTurnEvaluation() {
   const [progress, setProgress] = React.useState(0);
   const [progressMessage, setProgressMessage] = React.useState("");
   const progressIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  // Run id of the live session evaluation just executed (from the SSE done event)
+  const [evalRunId, setEvalRunId] = React.useState<string | null>(null);
+  // Most recent pre-existing *_session_eval run, for "View Pre-run Results"
+  const [preRunId, setPreRunId] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    fetch("/api/evaluation/latest-run?run_type=session")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => data?.run_id && setPreRunId(data.run_id))
+      .catch(() => {});
+  }, []);
 
   const { data: experimentData, isLoading: isExperimentLoading } = useQueryExperiment();
-  const evaluationRunsUrl = experimentData?.link
+  // Prefer a deep link to a specific run: the live run just executed, else
+  // the latest pre-existing session eval run. Fall back to the all-runs list.
+  const allRunsUrl = experimentData?.link
     ? experimentData.link.replace("?compareRunsMode=TRACES", "/evaluation-runs")
     : null;
+  const specificRunId = evalRunId ?? preRunId;
+  const evaluationRunsUrl =
+    specificRunId && experimentData?.evaluation_run_url_template
+      ? experimentData.evaluation_run_url_template.replace("{runId}", specificRunId)
+      : allRunsUrl;
 
   const activeJudges = judges.filter(j => j.enabled);
   const totalScorers = activeJudges.length;
@@ -101,6 +119,7 @@ export function MultiTurnEvaluation() {
                 if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
                 setProgress(100);
                 setProgressMessage("Session evaluation complete!");
+                if (data.run_id) setEvalRunId(data.run_id);
                 setHasRun(true);
                 setIsRunning(false);
               } else if (data.type === "error") {

@@ -22,6 +22,7 @@ import {
   Trophy,
   HelpCircle,
   Headphones,
+  Home,
 } from "lucide-react";
 
 import { NavMain } from "@/components/nav-main";
@@ -63,14 +64,20 @@ const data = {
   ],
   mlflowSteps: [
     {
+      title: "Overview",
+      value: "landing",
+      icon: Home,
+      description: "Start here — choose the Telco or NFL demo",
+    },
+    {
       title: "Telco Support Agent",
       value: "telco",
       icon: Headphones,
       description:
-        "Start here — chat with a production-style agent traced by MLflow",
+        "A simple example — chat with a production-style agent traced by MLflow",
     },
     {
-      title: "Demo Overview",
+      title: "Defensive Coordinator Overview",
       value: "demo-overview",
       icon: PlayCircle,
       description: "Introduction to DC Assistant optimization",
@@ -202,7 +209,7 @@ export function AppSidebar({
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-semibold">
-                    MLflow 3.0 GenAI Demo
+                    MLflow GenAI Demo
                   </span>
                 </div>
               </a>

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix='/api/evaluation', tags=['evaluation'])
 
-# 10 representative coaching questions for live demo evaluation
+# Fallback questions if the curated dataset can't be loaded
 EVAL_QUESTIONS = [
   'How does the 2024 Kansas City Chiefs offense approach third-and-long situations?',
   'What are the most common passing concepts used by the 2023 San Francisco 49ers in the red zone?',
@@ -28,6 +28,87 @@ EVAL_QUESTIONS = [
   'Which receivers are most targeted by the 2024 Los Angeles Rams on third down?',
   'How does the 2024 New England Patriots offense exploit man-to-man coverage?',
 ]
+
+# Curated single-turn eval dataset (questions sourced from real app traces).
+# Fully-qualified UC name; override via env when the dataset lives outside
+# the app's UC_CATALOG.UC_SCHEMA (e.g. schema-permission constraints).
+SINGLE_TURN_EVAL_DATASET = 'single_turn_eval_set'
+
+
+def get_single_turn_dataset_name() -> str:
+  """Resolve the fully-qualified UC name of the single-turn eval dataset."""
+  override = os.environ.get('SINGLE_TURN_EVAL_DATASET_NAME')
+  if override:
+    return override
+  catalog = os.environ.get('UC_CATALOG', '')
+  schema = os.environ.get('UC_SCHEMA', '')
+  return f'{catalog}.{schema}.{SINGLE_TURN_EVAL_DATASET}'
+
+
+def read_dataset_table_via_sql(table_name: str, column: str) -> list[str]:
+  """Read one column of a dataset's synced UC table via the SQL API.
+
+  Fallback for Databricks Apps: databricks-agents' get_dataset() syncs the
+  dataset to UC on every read, which imports pyspark — not available in the
+  app container — so it always raises there. The synced UC table itself is
+  readable with just databricks-sdk. Requires SQL_WAREHOUSE_ID.
+  """
+  from databricks.sdk import WorkspaceClient
+
+  warehouse_id = os.environ.get('SQL_WAREHOUSE_ID', '')
+  if not warehouse_id:
+    raise RuntimeError('SQL_WAREHOUSE_ID not set; cannot read dataset table via SQL')
+
+  w = WorkspaceClient()
+  resp = w.statement_execution.execute_statement(
+    statement=f'SELECT {column} FROM {table_name}',
+    warehouse_id=warehouse_id,
+    wait_timeout='50s',
+  )
+  state = str(getattr(resp.status, 'state', ''))
+  if 'SUCCEEDED' not in state:
+    raise RuntimeError(f'SQL read of {table_name} failed: {state} {getattr(resp.status, "error", "")}')
+  rows = resp.result.data_array or []
+  return [r[0] for r in rows if r and r[0]]
+
+
+def load_single_turn_eval_data():
+  """Load eval data from the curated dataset, falling back to EVAL_QUESTIONS.
+
+  Tries mlflow.genai.datasets first (links the dataset to the run in the
+  MLflow UI when it works), then a direct SQL read of the synced UC table,
+  then the hardcoded fallback questions.
+
+  Returns (data, source_name, record_count).
+  """
+  dataset_name = get_single_turn_dataset_name()
+  try:
+    ds = mlflow.genai.datasets.get_dataset(name=dataset_name)
+    n_records = len(ds.to_df())
+    if n_records > 0:
+      logger.info(f'Loaded eval dataset {dataset_name} ({n_records} records)')
+      return ds, dataset_name, n_records
+    logger.warning(f'Eval dataset {dataset_name} is empty')
+  except Exception as e:
+    logger.warning(f'mlflow.genai.datasets could not load {dataset_name}: {e}')
+
+  try:
+    raw_inputs = read_dataset_table_via_sql(dataset_name, 'inputs')
+    records = []
+    for raw in raw_inputs:
+      inputs = json.loads(raw) if isinstance(raw, str) else raw
+      if isinstance(inputs, dict) and inputs.get('input'):
+        records.append({'inputs': inputs})
+    if records:
+      logger.info(f'Loaded eval dataset {dataset_name} via SQL ({len(records)} records)')
+      return records, f'{dataset_name} (via SQL)', len(records)
+  except Exception as e:
+    logger.warning(f'SQL read of {dataset_name} failed: {e}; using fallback questions')
+
+  fallback = [
+    {'inputs': {'input': [{'role': 'user', 'content': q}]}} for q in EVAL_QUESTIONS
+  ]
+  return fallback, 'builtin_fallback', len(fallback)
 
 
 class RunEvalRequest(BaseModel):
@@ -85,28 +166,25 @@ async def run_evaluation(request: RunEvalRequest):
           scorers.append(Guidelines(name=g['name'], guidelines=g['guideline']))
           logger.info(f'Added custom guideline scorer: {g["name"]}')
 
-      total_questions = len(EVAL_QUESTIONS)
+      # Load curated eval questions from the UC dataset (fallback: EVAL_QUESTIONS)
+      eval_data, dataset_source, total_questions = load_single_turn_eval_data()
       total_scorers = len(scorers)
       logger.info(f'Total scorers built: {total_scorers} ({[type(s).__name__ for s in scorers]})')
 
-      yield f'data: {json.dumps({"type": "start", "total_questions": total_questions, "total_scorers": total_scorers})}\n\n'
+      yield f'data: {json.dumps({"type": "start", "total_questions": total_questions, "total_scorers": total_scorers, "dataset": dataset_source})}\n\n'
 
       logger.info(
-        f'Starting evaluation: {total_questions} questions, {total_scorers} scorers'
+        f'Starting evaluation: {total_questions} questions from {dataset_source}, {total_scorers} scorers'
       )
 
-      # Build evaluation data - match notebook pattern
       # 'input' key matches predict_fn parameter name
       from mlflow_demo.agent.agent import AGENT
-
-      eval_data = [
-        {'inputs': {'input': [{'role': 'user', 'content': q}]}}
-        for q in EVAL_QUESTIONS
-      ]
+      from mlflow.types.responses import ResponsesAgentRequest
 
       def predict_fn(input):
-        AGENT.start_new_session()
-        return AGENT.predict({'input': input})
+        # Stateless predict: each eval question gets its own auto-generated
+        # session id and empty conversation history.
+        return AGENT.predict(ResponsesAgentRequest(input=input))
 
       # Send progress updates as we go
       # We'll run the actual evaluation and stream progress
@@ -155,8 +233,47 @@ async def run_evaluation(request: RunEvalRequest):
   )
 
 
-# Dataset name for session-level evaluation traces
+@router.get('/latest-run')
+async def get_latest_eval_run(run_type: str = 'single'):
+  """Return the most recent evaluation run of the given type.
+
+  run_type 'single' matches runs named *_dc_eval (built-in judge evals);
+  'session' matches *_session_eval. Used by the UI so "View Pre-run Results"
+  deep-links to a specific run instead of the all-runs list.
+  """
+  from mlflow.tracking import MlflowClient
+
+  suffix = '_session_eval' if run_type == 'session' else '_dc_eval'
+  try:
+    client = MlflowClient()
+    runs = client.search_runs(
+      [get_mlflow_experiment_id()],
+      order_by=['attributes.start_time DESC'],
+      max_results=100,
+    )
+    for r in runs:
+      name = r.info.run_name or ''
+      if name.endswith(suffix) and r.info.status == 'FINISHED':
+        return {'run_id': r.info.run_id, 'run_name': name}
+  except Exception as e:
+    logger.warning(f'latest-run lookup failed: {e}')
+  return {'run_id': None, 'run_name': None}
+
+
+# Dataset name for session-level evaluation traces. Fully-qualified UC name;
+# override via env when the dataset lives outside the app's UC_CATALOG.UC_SCHEMA
+# (mirrors SINGLE_TURN_EVAL_DATASET_NAME below).
 SESSION_EVAL_DATASET = 'short_eval_session_set'
+
+
+def get_session_dataset_name() -> str:
+  """Resolve the fully-qualified UC name of the session eval dataset."""
+  override = os.environ.get('SESSION_EVAL_DATASET_NAME')
+  if override:
+    return override
+  catalog = os.environ.get('UC_CATALOG', '')
+  schema = os.environ.get('UC_SCHEMA', '')
+  return f'{catalog}.{schema}.{SESSION_EVAL_DATASET}'
 
 
 @router.post('/run-session')
@@ -196,19 +313,26 @@ async def run_session_evaluation(request: RunSessionEvalRequest):
       yield f'data: {json.dumps({"type": "start", "total_scorers": total_scorers})}\n\n'
 
       # Load trace IDs from the evaluation dataset
-      catalog = os.environ.get('UC_CATALOG', '')
-      schema = os.environ.get('UC_SCHEMA', '')
-      dataset_name = f'{catalog}.{schema}.{SESSION_EVAL_DATASET}'
+      dataset_name = get_session_dataset_name()
 
       logger.info(f'Loading dataset: {dataset_name}')
-      ds = mlflow.genai.datasets.get_dataset(name=dataset_name)
-      df = ds.to_df()
-
       trace_ids = set()
-      for _, row in df.iterrows():
-        source = row.get('source', {})
-        if isinstance(source, dict) and 'trace' in source:
-          trace_ids.add(source['trace']['trace_id'])
+      try:
+        ds = mlflow.genai.datasets.get_dataset(name=dataset_name)
+        df = ds.to_df()
+        for _, row in df.iterrows():
+          source = row.get('source', {})
+          if isinstance(source, dict) and 'trace' in source:
+            trace_ids.add(source['trace']['trace_id'])
+      except Exception as e:
+        # In the app container get_dataset() fails (needs pyspark for UC
+        # sync); read the synced UC table directly instead.
+        logger.warning(f'mlflow.genai.datasets could not load {dataset_name}: {e}; trying SQL')
+        for raw in read_dataset_table_via_sql(dataset_name, 'source'):
+          source = json.loads(raw) if isinstance(raw, str) else raw
+          trace = source.get('trace') if isinstance(source, dict) else None
+          if trace and trace.get('trace_id'):
+            trace_ids.add(trace['trace_id'])
 
       logger.info(f'Dataset contains {len(trace_ids)} trace IDs')
 

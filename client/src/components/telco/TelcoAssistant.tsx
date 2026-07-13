@@ -19,9 +19,10 @@ export function TelcoAssistant() {
         <div>
           <h1 className="text-xl font-semibold">Telco Support Agent</h1>
           <p className="text-sm text-muted-foreground max-w-2xl">
-            A production-style chat agent for telecom customer support. Each
-            response below is fully traced by MLflow — see how that data powers
-            the rest of this demo.
+            A production-style chat agent for telecom customer support — a simple
+            example of an agent traced end-to-end by MLflow. For the full
+            evaluation, alignment, and prompt optimization lifecycle, see the NFL
+            Defensive Coordinator Assistant walkthrough.
           </p>
         </div>
         <Button
@@ -29,7 +30,7 @@ export function TelcoAssistant() {
           size="sm"
           onClick={() => navigate(getPathFromViewType("demo-overview"))}
         >
-          See how this was built and evaluated
+          Try the full MLflow walkthrough
           <ArrowRight className="ml-2 h-4 w-4" />
         </Button>
       </div>

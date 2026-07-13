@@ -5,12 +5,15 @@ import logging
 import os
 from enum import Enum
 from typing import Optional
+from uuid import uuid4
 
 import mlflow
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
+from mlflow_demo.agent.session_store import SessionStore
 from mlflow_demo.utils.mlflow_helpers import get_mlflow_experiment_id
 from pydantic import BaseModel
+from server.dependencies.auth import RequestUserContext, get_user_context
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +22,19 @@ router = APIRouter(prefix='/api/dc-assistant', tags=['dc-assistant'])
 # Mode selection: 'local' uses the agent directly, 'endpoint' uses serving endpoint
 DC_ASSISTANT_MODE = os.getenv('DC_ASSISTANT_MODE', 'local')
 
+# Per-session conversation state for /multi-turn, keyed by session_id.
+# Single process only -- see SessionStore docstring for why that's fine here.
+session_store = SessionStore()
+
 
 class DcAnalysisRequest(BaseModel):
   """Request for DC Assistant analysis."""
 
   question: str
+  # Optional multimodal input: base64-encoded image (no data: prefix) plus its
+  # mime type, e.g. a formation/coverage diagram the coach is asking about.
+  image_base64: Optional[str] = None
+  image_mime_type: str = 'image/png'
 
 
 class FeedbackRating(str, Enum):
@@ -65,27 +76,59 @@ class MultiTurnResponse(BaseModel):
   trace_id: Optional[str] = None
 
 
-async def _generate_with_local_agent(question: str):
-  """Generate response using local agent."""
+async def _generate_with_local_agent(
+  question: str,
+  user_ctx: RequestUserContext,
+  image_base64: Optional[str] = None,
+  image_mime_type: str = 'image/png',
+):
+  """Generate response using local agent.
+
+  Single-turn requests don't need conversation continuity: no session_id is
+  passed, so the trace carries no session metadata (keeps the MLflow
+  Sessions view clean), and this never touches the shared SessionStore/AGENT
+  state -- it must not be able to clobber an in-flight /multi-turn
+  conversation.
+
+  When image_base64 is provided, the question and image are sent as a single
+  multimodal user turn (see agent.py's _to_chat_messages_with_images for how
+  the image content part survives the Responses -> ChatCompletions conversion).
+  """
   from mlflow_demo.agent.agent import AGENT
 
   done_sent = False
   full_response = ''
   trace_id = None
 
-  try:
-    # Reset conversation history for single-turn requests
-    AGENT.start_new_session()
+  # A single extra content part attached to this turn's user message -- not
+  # conversation_history, which represents *prior* turns. Passing this as
+  # conversation_history would make predict_stream count the current turn
+  # twice (see agent.py predict_stream_local's image_content parameter).
+  image_content = None
+  if image_base64:
+    image_content = [
+      {
+        'type': 'input_image',
+        'image_url': f'data:{image_mime_type};base64,{image_base64}',
+      },
+    ]
 
+  try:
     # Set MLflow experiment for tracing
     mlflow.set_experiment(experiment_id=get_mlflow_experiment_id())
 
     logger.info('=' * 80)
     logger.info(f'🚀 CALLING AGENT.predict_stream_local()')
     logger.info(f'📝 Question: {question}')
+    logger.info(f'🖼️  Image attached: {bool(image_base64)}')
     logger.info('=' * 80)
 
-    for event in AGENT.predict_stream_local(question):
+    for event in AGENT.predict_stream_local(
+      question,
+      image_content=image_content,
+      user_id=user_ctx.user_id,
+      model_serving_client=user_ctx.model_serving_client,
+    ):
       event_type = event.get('type')
 
       if event_type == 'token':
@@ -121,10 +164,8 @@ async def _generate_with_local_agent(question: str):
     yield f'data: {json.dumps({"type": "done", "trace_id": trace_id})}\n\n'
 
 
-async def _generate_with_endpoint(question: str):
+async def _generate_with_endpoint(question: str, user_ctx: RequestUserContext):
   """Generate response using Databricks serving endpoint."""
-  from databricks.sdk import WorkspaceClient
-
   dc_endpoint = os.getenv('LLM_MODEL')
   done_sent = False
 
@@ -136,7 +177,7 @@ async def _generate_with_endpoint(question: str):
     # Set MLflow experiment for tracing
     mlflow.set_experiment(experiment_id=get_mlflow_experiment_id())
 
-    w = WorkspaceClient()
+    w = user_ctx.workspace_client
     request_payload = {'input': [{'role': 'user', 'content': question}]}
 
     logger.info(f'Calling DC Assistant endpoint: {dc_endpoint}')
@@ -174,15 +215,22 @@ async def _generate_with_endpoint(question: str):
 
 
 @router.post('/analyze-stream')
-async def dc_assistant_analyze_stream(request_data: DcAnalysisRequest):
+async def dc_assistant_analyze_stream(
+  request_data: DcAnalysisRequest, user_ctx: RequestUserContext = Depends(get_user_context)
+):
   """Stream DC Assistant analysis generation."""
 
   async def generate():
     if DC_ASSISTANT_MODE == 'endpoint':
-      async for chunk in _generate_with_endpoint(request_data.question):
+      async for chunk in _generate_with_endpoint(request_data.question, user_ctx):
         yield chunk
     else:
-      async for chunk in _generate_with_local_agent(request_data.question):
+      async for chunk in _generate_with_local_agent(
+        request_data.question,
+        user_ctx,
+        image_base64=request_data.image_base64,
+        image_mime_type=request_data.image_mime_type,
+      ):
         yield chunk
 
   return StreamingResponse(
@@ -197,7 +245,9 @@ async def dc_assistant_analyze_stream(request_data: DcAnalysisRequest):
 
 
 @router.post('/feedback', response_model=FeedbackResponse)
-async def submit_feedback(feedback: FeedbackRequest):
+async def submit_feedback(
+  feedback: FeedbackRequest, user_ctx: RequestUserContext = Depends(get_user_context)
+):
   """Submit user feedback linked to trace."""
   try:
     is_positive = feedback.rating == FeedbackRating.THUMBS_UP
@@ -209,7 +259,7 @@ async def submit_feedback(feedback: FeedbackRequest):
       rationale=feedback.comment,
       source=mlflow.entities.AssessmentSource(
         source_type='HUMAN',
-        source_id=feedback.user_name or 'anonymous',
+        source_id=feedback.user_name or user_ctx.user_email or 'anonymous',
       ),
     )
 
@@ -222,14 +272,17 @@ async def submit_feedback(feedback: FeedbackRequest):
 
 
 @router.post('/multi-turn', response_model=MultiTurnResponse)
-async def multi_turn_conversation(request: MultiTurnRequest):
+async def multi_turn_conversation(
+  request: MultiTurnRequest, user_ctx: RequestUserContext = Depends(get_user_context)
+):
   """
   Handle multi-turn conversations with session tracking.
 
   This endpoint demonstrates MLflow's session tracking feature where multiple
   conversation turns are grouped together in a single session view.
-  The agent manages conversation history internally and sets session metadata
-  on MLflow traces so related turns are grouped together.
+  Conversation state lives in the module-level SessionStore, keyed by
+  session_id, so concurrent conversations from different users/tabs never
+  share state -- the agent itself is stateless per call.
   """
   from mlflow_demo.agent.agent import AGENT
   from mlflow.types.responses import Message, ResponsesAgentRequest
@@ -238,16 +291,13 @@ async def multi_turn_conversation(request: MultiTurnRequest):
     # Set MLflow experiment
     mlflow.set_experiment(experiment_id=get_mlflow_experiment_id())
 
-    # Start a new session on first turn (clears agent history)
-    if request.is_first_turn:
-      session_id = AGENT.start_new_session(session_id=request.session_id)
-      logger.info(f'Started new conversation session: {session_id}')
-    else:
-      session_id = AGENT.get_current_session_id() or request.session_id
+    # First turn always starts fresh state, even if the client sent a stale id.
+    lookup_id = None if request.is_first_turn else request.session_id
+    state = session_store.get_or_create(lookup_id, user_id=user_ctx.user_id)
 
     logger.info(
-      f'Multi-turn request - Session: {session_id}, '
-      f'History: {len(AGENT.conversation_history)} messages'
+      f'Multi-turn request - Session: {state.session_id}, '
+      f'History: {len(state.history)} messages'
     )
 
     # Build request with just the current question
@@ -256,8 +306,16 @@ async def multi_turn_conversation(request: MultiTurnRequest):
       input=[Message(role='user', content=request.question)]
     )
 
-    # Call predict which handles session metadata and tracing
-    result = AGENT.predict(agent_request)
+    # Serialize turns within the same session (e.g. a double-submit); across
+    # sessions this never blocks since each has its own lock.
+    with state.lock:
+      result = AGENT.predict(
+        agent_request,
+        session_id=state.session_id,
+        user_id=state.user_id,
+        conversation_history=state.history,
+        model_serving_client=user_ctx.model_serving_client,
+      )
 
     # Extract response text from result
     response_text = ''
@@ -275,7 +333,7 @@ async def multi_turn_conversation(request: MultiTurnRequest):
     logger.info(f'Multi-turn response complete - {len(response_text)} chars, trace: {trace_id}')
 
     return MultiTurnResponse(
-      response=response_text, session_id=session_id, trace_id=trace_id
+      response=response_text, session_id=state.session_id, trace_id=trace_id
     )
 
   except Exception as e:

@@ -2,6 +2,14 @@ command: [
   "uvicorn",
   "server.app:app"
 ]
+# On-behalf-of auth: Databricks Apps forwards the calling user's OAuth token
+# to this app (as X-Forwarded-Access-Token) and their identity (as
+# X-Forwarded-Email/-User/-Preferred-Username) once the app has been granted
+# the "serving.serving-endpoints" user-authorization scope. This is NOT
+# configured here -- app.yaml has no effect on it. It's set via either the
+# Databricks UI (app page > User authorization > +Add scope) or:
+#   databricks apps update <app-name> --json '{"user_api_scopes": ["serving.serving-endpoints"]}'
+# Users are prompted for one-time consent on first access after the scope is granted.
 resources:
   - name: tracing-warehouse
     description: 'SQL warehouse for UC tracing + telco UC function calls'
@@ -31,7 +39,26 @@ env:
     value: 'users'
   - name: 'UC_SCHEMA'
     value: 'austin_choi'
+  # Curated single-turn eval dataset. Lives in nethra's schema because
+  # users.austin_choi denies CREATE TABLE; app SP granted SELECT.
+  - name: 'SINGLE_TURN_EVAL_DATASET_NAME'
+    value: 'users.nethra_ranganathan.single_turn_eval_set'
+  # Curated multi-turn/session eval dataset (10 sessions, 20 traces). Same
+  # nethra's-schema constraint as above; app SP granted SELECT.
+  - name: 'SESSION_EVAL_DATASET_NAME'
+    value: 'users.nethra_ranganathan.multi_turn_eval_set'
+  # Warehouse for reading eval dataset UC tables (get_dataset needs pyspark,
+  # unavailable in the app container) and for session deep links.
+  - name: 'SQL_WAREHOUSE_ID'
+    value: '75fd8278393d07eb'
   - name: 'MLFLOW_ENABLE_ASYNC_TRACE_LOGGING'
+    value: 'false'
+  # Keeps multimodal image content as raw base64 data URIs in trace spans
+  # instead of MLflow auto-extracting them into mlflow-attachment:// refs --
+  # this workspace's trace UI renders raw base64 data URIs inline but does
+  # not yet resolve mlflow-attachment:// URIs, so extraction breaks the
+  # Multi-Modal Tracing demo's image rendering.
+  - name: 'MLFLOW_TRACE_EXTRACT_ATTACHMENTS'
     value: 'false'
   - name: 'PROMPT_NAME'
     value: 'dc_assistant_system_prompt'

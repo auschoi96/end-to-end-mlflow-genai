@@ -271,6 +271,10 @@ export function MultiModalDemo() {
                   View this trace
                 </Button>
               )}
+              <p className="text-xs text-muted-foreground">
+                Note: the image isn't shown on the trace's Summary tab -- click into{" "}
+                <strong>Details &amp; Timeline → Completions</strong> to see it in the Chat view.
+              </p>
             </div>
           </div>
         </CardContent>
@@ -434,7 +438,7 @@ export function MultiModalDemo() {
 
                   {!isStreaming && traceUrlTemplate && currentTraceId && (
                     <div className="border-t pt-6">
-                      <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center justify-between mb-2">
                         <h4 className="font-medium">See trace in MLflow UI</h4>
                         <Button
                           variant="default"
@@ -448,6 +452,11 @@ export function MultiModalDemo() {
                           View Trace
                         </Button>
                       </div>
+                      <p className="text-xs text-muted-foreground">
+                        Note: the image isn't shown on the trace's Summary tab -- click into{" "}
+                        <strong>Details &amp; Timeline → Completions</strong> to see it in the
+                        Chat view.
+                      </p>
                     </div>
                   )}
                 </div>

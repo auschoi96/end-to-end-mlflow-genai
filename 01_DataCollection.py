@@ -26,10 +26,7 @@ print(f"Target seasons: {SEASONS}")
 
 # COMMAND ----------
 
-
-
 # COMMAND ----------
-
 # Load datasets via nflreadpy (returns Polars DataFrames)
 print("Loading Play-by-Play...")
 pbp_pl: pl.DataFrame = nfl.load_pbp(SEASONS)
@@ -49,7 +46,6 @@ players_pl: pl.DataFrame = nfl.load_players()
 print("Players shape:", players_pl.shape)
 
 # COMMAND ----------
-
 # Persist to Delta tables in Unity Catalog
 
 def write_delta_from_polars(df_pl: pl.DataFrame, full_table_name: str) -> None:

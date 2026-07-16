@@ -93,6 +93,7 @@ class ExperimentInfo(BaseModel):
   link: str
   trace_url_template: str
   session_url_template: str
+  evaluation_run_url_template: str
   failed_traces_url: str
   eval_dataset_url: str
   monitoring_url: str
@@ -144,11 +145,20 @@ async def experiment():
     session_params.append(f'sqlWarehouseId={sql_warehouse_id}')
   session_query = '&'.join(session_params)
 
+  # Deep-link template for a specific evaluation run in the MLflow UI
+  eval_run_url = (
+    f'{databricks_host}/ml/experiments/{experiment_id}/evaluation-runs'
+    f'?selectedRunUuid={{runId}}'
+  )
+  if workspace_id:
+    eval_run_url += f'&o={workspace_id}'
+
   return ExperimentInfo(
     experiment_id=experiment_id,
     link=f'{databricks_host}/ml/experiments/{experiment_id}?compareRunsMode=TRACES',
     trace_url_template=f'{databricks_host}/ml/experiments/{experiment_id}/traces?selectedEvaluationId=',
     session_url_template=f'{databricks_host}/ml/experiments/{experiment_id}/chat-sessions/{{sessionId}}?{session_query}',
+    evaluation_run_url_template=eval_run_url,
     failed_traces_url=f'{databricks_host}/ml/experiments/{experiment_id}/traces?&filter=TAG%3A%3A%3D%3A%3Ayes%3A%3Aeval_example&filter=ASSESSMENT%3A%3A%3D%3A%3Ano%3A%3Aaccuracy',
     eval_dataset_url=f'{databricks_host}/ml/experiments/{experiment_id}/datasets',
     monitoring_url=f'{databricks_host}/ml/experiments/{experiment_id}/evaluation-monitoring',
@@ -274,10 +284,21 @@ else:
     # Add catch-all route for SPA routing (must come after API routes)
     @app.get('/{full_path:path}')
     async def spa_fallback(full_path: str):
-      """Serve index.html for all non-API routes to support SPA routing."""
+      """Serve static files from the build root, falling back to index.html for SPA routes."""
       # Don't interfere with API routes
       if full_path.startswith('api/'):
         raise HTTPException(status_code=404, detail='API endpoint not found')
+
+      # Public assets (images, favicon, manifest.json, etc.) are copied to the
+      # build root by the frontend build — serve them directly instead of
+      # falling through to index.html, or every root-level asset 404s as HTML.
+      requested_file = (build_path / full_path).resolve()
+      if (
+        full_path
+        and requested_file.is_file()
+        and build_path.resolve() in requested_file.parents
+      ):
+        return FileResponse(requested_file)
 
       index_file = build_path / 'index.html'
       if index_file.exists():

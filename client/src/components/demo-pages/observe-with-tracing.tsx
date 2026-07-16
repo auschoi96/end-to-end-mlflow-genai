@@ -4,6 +4,7 @@ import { CodeSnippet } from "@/components/code-snippet";
 import { CollapsibleSection } from "@/components/collapsible-section";
 import { MarkdownContent } from "@/components/markdown-content";
 import { DcTracingDemo } from "@/components/dc-assistant/DcTracingDemo";
+import { MultiModalDemo } from "@/components/dc-assistant/MultiModalDemo";
 import { MultiToolDemo } from "@/components/dc-assistant/MultiToolDemo";
 import { MultiTurnDemo } from "@/components/dc-assistant/MultiTurnDemo";
 import { QuestionTester } from "@/components/dc-assistant/QuestionTester";
@@ -411,11 +412,34 @@ The diff below shows how to add advanced tracing features:`}
         </div>
       </div>
 
-      {/* Step 5: Question Tester */}
+      {/* Step 5: Multi-Modal Tracing */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center w-8 h-8 bg-teal-100 text-teal-600 rounded-full font-semibold text-sm">
+            5
+          </div>
+          <h3 className="text-lg font-semibold">
+            Multi-modal tracing
+          </h3>
+        </div>
+
+        <div className="ml-11 space-y-4">
+          <p className="text-muted-foreground">
+            Coaches don't just type questions—they share formation diagrams, coverage shells,
+            and play calls. MLflow tracing captures images alongside text and tool calls in the
+            same trace, so you can see exactly what the agent looked at and how it reasoned
+            from there.
+          </p>
+
+          <MultiModalDemo />
+        </div>
+      </div>
+
+      {/* Step 6: Question Tester */}
       <div className="space-y-4">
         <div className="flex items-center gap-3">
           <div className="flex items-center justify-center w-8 h-8 bg-yellow-100 text-yellow-600 rounded-full font-semibold text-sm">
-            5
+            6
           </div>
           <h3 className="text-lg font-semibold">
             Question Tester

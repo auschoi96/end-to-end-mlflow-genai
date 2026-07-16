@@ -100,6 +100,17 @@ export function EvaluationBuilder() {
   const [evalProgress, setEvalProgress] = React.useState(0);
   const [evalProgressMessage, setEvalProgressMessage] = React.useState("");
   const [evalError, setEvalError] = React.useState<string | null>(null);
+  // Run id of the live evaluation just executed (from the SSE done event)
+  const [evalRunId, setEvalRunId] = React.useState<string | null>(null);
+  // Most recent pre-existing *_dc_eval run, for "View Pre-run Results"
+  const [preRunId, setPreRunId] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    fetch("/api/evaluation/latest-run?run_type=single")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => data?.run_id && setPreRunId(data.run_id))
+      .catch(() => {});
+  }, []);
 
   // Ref to hold the progress interval so we can clear it on completion
   const progressIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
@@ -176,6 +187,7 @@ export function EvaluationBuilder() {
                 if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
                 setEvalProgress(100);
                 setEvalProgressMessage("Evaluation complete!");
+                if (data.run_id) setEvalRunId(data.run_id);
                 setEvalHasRun(true);
                 setIsEvalRunning(false);
               } else if (data.type === "error") {
@@ -287,10 +299,17 @@ export function EvaluationBuilder() {
   const { data: experimentData, isLoading: isExperimentLoading } =
     useQueryExperiment();
 
-  // Build evaluation-runs URL from experiment data
-  const evaluationRunsUrl = experimentData?.link
+  // Build evaluation-runs URL from experiment data.
+  // Prefer a deep link to a specific run: the live run just executed, else
+  // the latest pre-existing eval run. Fall back to the all-runs list.
+  const allRunsUrl = experimentData?.link
     ? experimentData.link.replace("?compareRunsMode=TRACES", "/evaluation-runs")
     : null;
+  const specificRunId = evalRunId ?? preRunId;
+  const evaluationRunsUrl =
+    specificRunId && experimentData?.evaluation_run_url_template
+      ? experimentData.evaluation_run_url_template.replace("{runId}", specificRunId)
+      : allRunsUrl;
 
   // Compute active scorers for the Run Evaluation button
   const activeBuiltinJudges = builtinJudges.filter(j => j.enabled && !j.disabled);

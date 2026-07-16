@@ -63,6 +63,12 @@ export function MultiTurnDemo() {
 
     const conversationFlow = getConversationFlow();
 
+    // Track the session id in a local variable: the `sessionId` state value
+    // captured by this closure never updates mid-loop, so relying on it sent
+    // session_id: null on follow-up turns and the server minted a new session
+    // per turn instead of appending to the first one.
+    let activeSessionId: string | null = null;
+
     try {
       // Run through all conversation turns
       for (let i = 0; i < conversationFlow.length; i++) {
@@ -79,7 +85,7 @@ export function MultiTurnDemo() {
           },
           body: JSON.stringify({
             question: turn.question,
-            session_id: sessionId,
+            session_id: activeSessionId,
             is_first_turn: i === 0,
           }),
         });
@@ -92,6 +98,7 @@ export function MultiTurnDemo() {
 
         // Update session ID from first response
         if (i === 0 && data.session_id) {
+          activeSessionId = data.session_id;
           setSessionId(data.session_id);
         }
 

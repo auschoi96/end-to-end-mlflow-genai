@@ -27,7 +27,7 @@ You've aligned judges, optimized prompts, and collected expert labels. Now you n
 
 MLflow 3 lets you **register scorers directly to an experiment** and run them automatically against production traces with configurable sampling rates. Assessments are attached to the traces they evaluate — everything lives in one place.
 
-Separately, you can **export traces to Unity Catalog** (Public Preview) by linking an experiment to a UC schema via **set_experiment_trace_location()**. This creates three OpenTelemetry-format Delta tables (spans, logs, metrics) in your schema — in our case under **users.austin_choi**. Once linked, every trace and scorer assessment is SQL-queryable, ideal for dashboards, trend analysis, and feeding low-scoring traces back into labeling sessions.
+Separately, you can **export traces to Unity Catalog** (Public Preview) by linking an experiment to a UC schema via **set_experiment_trace_location()**. This creates three OpenTelemetry-format Delta tables (spans, logs, metrics) in your own schema. Once linked, every trace and scorer assessment is SQL-queryable, ideal for dashboards, trend analysis, and feeding low-scoring traces back into labeling sessions.
 
 ## The Monitoring Loop
 1. **Register & start scorers** with sampling rates (safety at 100%, expensive judges at 5-20%)
@@ -203,7 +203,7 @@ export function HumanReview() {
             {[
               { icon: Eye, iconClass: "text-blue-600", valueClass: "text-blue-600", value: mockMetrics.tracesMonitored, label: "Traces Monitored (7d)" },
               { icon: CheckCircle2, iconClass: "text-green-600", valueClass: "text-green-600", value: `${(mockMetrics.avgFootballLanguage * 100).toFixed(0)}%`, label: "Avg Football Language" },
-              { icon: Shield, iconClass: "text-purple-600", valueClass: "text-purple-600", value: `${(mockMetrics.avgDataGrounded * 100).toFixed(0)}%`, label: "Avg Data Grounded" },
+              { icon: Shield, iconClass: "text-purple-600", valueClass: "text-purple-600", value: `${(mockMetrics.avgDataGrounded * 100).toFixed(0)}%`, label: "Avg Football Analysis: Grounded" },
               { icon: AlertTriangle, iconClass: "text-orange-600", valueClass: "text-orange-600", value: `${(mockMetrics.failureRate * 100).toFixed(1)}%`, label: "Failure Rate" },
             ].map(({ icon: Icon, iconClass, valueClass, value, label }) => (
               <div key={label} className="text-center p-3 border rounded-lg bg-white dark:bg-gray-900">
@@ -229,8 +229,8 @@ export function HumanReview() {
             <div className="space-y-3">
               {[
                 { label: "Football Language Score", value: mockMetrics.avgFootballLanguage },
-                { label: "Data Grounded Score", value: mockMetrics.avgDataGrounded },
-                { label: "Strategic Soundness Score", value: mockMetrics.avgStrategicSoundness },
+                { label: "Football Analysis: Data Grounded", value: mockMetrics.avgDataGrounded },
+                { label: "Football Analysis: Strategic Soundness", value: mockMetrics.avgStrategicSoundness },
               ].map(({ label, value }) => (
                 <div key={label}>
                   <div className="flex justify-between text-xs mb-1">

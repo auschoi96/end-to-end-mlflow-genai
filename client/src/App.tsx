@@ -49,6 +49,7 @@ import { JudgeAlignment } from "@/components/demo-pages/business-metrics";
 import { MonitoringDemo } from "@/components/demo-pages/prod-monitoring";
 import { HumanReview } from "@/components/demo-pages/human-review";
 import { TelcoAssistant } from "@/components/telco/TelcoAssistant";
+import { Landing } from "@/components/landing";
 import { ViewType, getViewTypeFromPath, getPathFromViewType } from "@/routes";
 
 const queryClient = new QueryClient();
@@ -124,6 +125,14 @@ export function Chat() {
           <Routes>
             <Route
               path="/"
+              element={
+                <div className="w-full h-full">
+                  <Landing />
+                </div>
+              }
+            />
+            <Route
+              path="/telco"
               element={
                 <div className="w-full h-full">
                   <TelcoAssistant />

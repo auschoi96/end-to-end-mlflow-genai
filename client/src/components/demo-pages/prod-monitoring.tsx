@@ -32,7 +32,7 @@ You've built the infrastructure: aligned judges, labeled data from coaching staf
 
 Manual prompt engineering is guesswork. Developers iterate blindly, prompts accumulate fragile ad-hoc rules, and there's no systematic way to know if a change actually helped. It doesn't scale.
 
-## The Solution: GEPA (Generalized Preference Alignment)
+## The Solution: GEPA (Genetic-Pareto)
 
 GEPA is MLflow's prompt optimization algorithm. Give it your baseline prompt and your expert-aligned judges, and it automatically generates candidate prompts, tests them, and selects the highest scorer. No manual trial-and-error.
 
@@ -586,7 +586,7 @@ export function MonitoringDemo() {
   return (
     <StepLayout
       title="Optimize Prompts with GEPA"
-      description="Automatically improve prompts using Generalized Preference Alignment guided by coaching-aligned judges"
+      description="Automatically improve prompts using GEPA's genetic-pareto search, guided by coaching-aligned judges"
       intro={introSection}
       codeSection={codeSection}
       demoSection={demoSection}

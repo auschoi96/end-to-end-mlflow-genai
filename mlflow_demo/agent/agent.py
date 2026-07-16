@@ -307,9 +307,50 @@ def _safe_parse_tool_arguments(raw_args: Any) -> dict:
         raise json.JSONDecodeError("Unable to parse tool arguments", s, 0)
 
 
+def _to_chat_messages_with_images(items: list[dict]) -> list[dict[str, Any]]:
+    """Convert Responses-API input items to chat completions messages, preserving images.
+
+    mlflow.types.responses.to_chat_completions_input() hardcodes `content["text"]`
+    for every part of a list-content message, so it raises KeyError on an
+    `input_image` part instead of passing it through. Messages with an image
+    part are converted here directly into the chat-completions multi-part
+    format (text + image_url); everything else still goes through the
+    library's to_chat_completions_input() unchanged.
+    """
+    messages: list[dict[str, Any]] = []
+    for item in items:
+        content = item.get("content") if isinstance(item, dict) else None
+        has_image = isinstance(content, list) and any(
+            isinstance(part, dict) and part.get("type") in ("input_image", "image_url")
+            for part in content
+        )
+        if not has_image:
+            messages.extend(to_chat_completions_input([item]))
+            continue
+
+        parts = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            part_type = part.get("type")
+            if part_type in ("input_text", "text"):
+                parts.append({"type": "text", "text": part.get("text", "")})
+            elif part_type in ("input_image", "image_url"):
+                url = part.get("image_url")
+                if isinstance(url, dict):
+                    url = url.get("url")
+                parts.append({"type": "image_url", "image_url": {"url": url}})
+        messages.append({"role": item.get("role", "user"), "content": parts})
+    return messages
+
+
 class ToolCallingAgent(ResponsesAgent):
     """
-    Class representing a tool-calling Agent with multi-session tracking
+    Tool-calling Agent. Stateless per call -- session id, user id, and
+    conversation history are passed explicitly to predict()/predict_stream()
+    rather than stored on self, so one shared instance is safe to reuse
+    concurrently across sessions/users (see server/routes/dc_assistant.py's
+    SessionStore for where the actual per-session state lives).
     """
 
     def __init__(
@@ -326,31 +367,6 @@ class ToolCallingAgent(ResponsesAgent):
         )
         self._tools_dict = {tool.name: tool for tool in tools}
 
-        # Session tracking - automatically managed
-        self.current_session_id: Optional[str] = None
-        self.current_user_id: Optional[str] = None
-
-        # Conversation history for multi-turn conversations
-        self.conversation_history: list[dict] = []
-
-    def start_new_session(self, session_id: Optional[str] = None, user_id: Optional[str] = None) -> str:
-        """
-        Start a new conversation session for multi-turn tracking.
-        Clears conversation history and creates a new session ID.
-
-        Returns:
-            The new session ID
-        """
-        self.current_session_id = session_id if session_id else str(uuid4())
-        if user_id:
-            self.current_user_id = user_id
-        self.conversation_history = []
-        return self.current_session_id
-
-    def get_current_session_id(self) -> Optional[str]:
-        """Get the current session ID."""
-        return self.current_session_id
-
     def get_tool_specs(self) -> list[dict]:
         """Returns tool specifications in the format OpenAI expects."""
         return [tool_info.spec for tool_info in self._tools_dict.values()]
@@ -360,10 +376,15 @@ class ToolCallingAgent(ResponsesAgent):
         """Executes the specified tool with the given arguments."""
         return self._tools_dict[tool_name].exec_fn(**args)
 
-    def call_llm(self, messages: list[dict[str, Any]]) -> Generator[dict[str, Any], None, None]:
+    def call_llm(
+        self,
+        messages: list[dict[str, Any]],
+        model_serving_client: Optional[OpenAI] = None,
+    ) -> Generator[dict[str, Any], None, None]:
+        client = model_serving_client or self.model_serving_client
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="PydanticSerializationUnexpectedValue")
-            for chunk in self.model_serving_client.chat.completions.create(
+            for chunk in client.chat.completions.create(
                 model=self.llm_endpoint,
                 messages=_merge_parallel_tool_calls(to_chat_completions_input(messages)),
                 tools=self.get_tool_specs(),
@@ -393,6 +414,7 @@ class ToolCallingAgent(ResponsesAgent):
         self,
         messages: list[dict[str, Any]],
         max_iter: int = 20,
+        model_serving_client: Optional[OpenAI] = None,
     ) -> Generator[ResponsesAgentStreamEvent, None, None]:
         for _ in range(max_iter):
             last_msg = messages[-1]
@@ -413,7 +435,8 @@ class ToolCallingAgent(ResponsesAgent):
                     yield self.handle_tool_call(tool_call, messages)
             else:
                 yield from output_to_responses_items_stream(
-                    chunks=self.call_llm(messages), aggregator=messages
+                    chunks=self.call_llm(messages, model_serving_client=model_serving_client),
+                    aggregator=messages,
                 )
 
         yield ResponsesAgentStreamEvent(
@@ -422,16 +445,26 @@ class ToolCallingAgent(ResponsesAgent):
         )
 
     @mlflow.trace(span_type=SpanType.AGENT)
-    def predict(self, request: ResponsesAgentRequest) -> ResponsesAgentResponse:
-        # Auto-generate session on first call
-        if self.current_session_id is None:
-            self.current_session_id = str(uuid4())
-
-        # Set trace metadata for session tracking
-        metadata = {"mlflow.trace.session": self.current_session_id}
-        if self.current_user_id:
-            metadata["mlflow.trace.user"] = self.current_user_id
-        mlflow.update_current_trace(metadata=metadata)
+    def predict(
+        self,
+        request: ResponsesAgentRequest,
+        *,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        conversation_history: Optional[list[dict]] = None,
+        model_serving_client: Optional[OpenAI] = None,
+    ) -> ResponsesAgentResponse:
+        # Only stamp session metadata when the caller is tracking a real
+        # multi-turn session. Single-turn calls (evals, one-off questions)
+        # must NOT get a session id — a session per trace clutters the
+        # MLflow Sessions view with one-trace "conversations".
+        metadata = {}
+        if session_id:
+            metadata["mlflow.trace.session"] = session_id
+        if user_id:
+            metadata["mlflow.trace.user"] = user_id
+        if metadata:
+            mlflow.update_current_trace(metadata=metadata)
 
         # Extract user input for clean display
         user_content = None
@@ -450,7 +483,11 @@ class ToolCallingAgent(ResponsesAgent):
 
             outputs = [
                 event.item
-                for event in self.predict_stream(request)
+                for event in self.predict_stream(
+                    request,
+                    conversation_history=conversation_history,
+                    model_serving_client=model_serving_client,
+                )
                 if event.type == "response.output_item.done"
             ]
 
@@ -476,26 +513,35 @@ class ToolCallingAgent(ResponsesAgent):
         )
 
     def predict_stream(
-        self, request: ResponsesAgentRequest
+        self,
+        request: ResponsesAgentRequest,
+        *,
+        conversation_history: Optional[list[dict]] = None,
+        model_serving_client: Optional[OpenAI] = None,
     ) -> Generator[ResponsesAgentStreamEvent, None, None]:
         # Extract current user input
         current_input = [i.model_dump() for i in request.input]
 
-        # Merge conversation history with current request
-        all_input_items = []
-        for hist_msg in self.conversation_history:
-            all_input_items.append(hist_msg)
+        # Merge conversation history (if the caller passed one -- e.g. a
+        # SessionStore-owned list for multi-turn) with the current request.
+        # Mutating `conversation_history` in place below (rather than
+        # replacing self.conversation_history) means different sessions'
+        # calls never touch the same list object, so this is safe under
+        # concurrency without any locking in the agent itself.
+        history = conversation_history if conversation_history is not None else []
+        all_input_items = list(history)
         all_input_items.extend(current_input)
 
-        # Convert to chat completion format
-        messages = to_chat_completions_input(all_input_items)
+        # Convert to chat completion format (preserves image content parts;
+        # see _to_chat_messages_with_images)
+        messages = _to_chat_messages_with_images(all_input_items)
         if SYSTEM_PROMPT:
             messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT.format()})
 
         # Collect assistant response while streaming
         assistant_response = None
 
-        for event in self.call_and_run_tools(messages=messages):
+        for event in self.call_and_run_tools(messages=messages, model_serving_client=model_serving_client):
             yield event
 
             # Extract text response from message items
@@ -509,16 +555,23 @@ class ToolCallingAgent(ResponsesAgent):
                                 assistant_response = content[0]["text"]
 
         # Save current turn to conversation history for next time
-        self.conversation_history.extend(current_input)
+        history.extend(current_input)
         if assistant_response:
-            self.conversation_history.append({
+            history.append({
                 "role": "assistant",
                 "content": [{"type": "text", "text": assistant_response}]
             })
 
     @mlflow.trace(name="dc_assistant_analysis")
     def predict_stream_local(
-        self, question: str, conversation_history: Optional[list[dict]] = None
+        self,
+        question: str,
+        conversation_history: Optional[list[dict]] = None,
+        *,
+        image_content: Optional[list[dict]] = None,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        model_serving_client: Optional[OpenAI] = None,
     ) -> Generator[dict, None, None]:
         """Stream a response for the given question (local convenience method).
 
@@ -528,6 +581,22 @@ class ToolCallingAgent(ResponsesAgent):
             question: The user's question
             conversation_history: Optional list of prior conversation messages
                                  Format: [{"role": "user/assistant", "content": "..."}]
+            image_content: Optional extra content parts (e.g. an `input_image`
+                     part) to attach to THIS turn's user message alongside the
+                     question text -- for the multi-modal tracing demo. This
+                     call is always single-turn when image_content is set: it
+                     builds one user message from question + image_content
+                     and passes no conversation_history to predict_stream, so
+                     the turn is never double-counted as both history and
+                     current input (see agent.py predict_stream's
+                     `all_input_items = history + current_input` merge).
+                     Mutually exclusive with conversation_history.
+            session_id: MLflow trace session id. Omit for single-turn calls —
+                        the trace then carries no session metadata at all.
+            user_id: Real end-user identity for trace attribution (e.g. from
+                     an OBO-forwarded email), if available.
+            model_serving_client: Per-request OpenAI client (e.g. OBO-scoped),
+                                   defaults to the agent's service-principal client.
 
         Yields dicts with keys:
             - type: 'token', 'tool_call', 'done', or 'error'
@@ -537,7 +606,18 @@ class ToolCallingAgent(ResponsesAgent):
             - error: error message (for type='error')
         """
         # Build input messages - use conversation history if provided
-        if conversation_history:
+        if image_content:
+            # Single-turn multimodal call: build the one user message here and
+            # forward no conversation_history, so predict_stream never merges
+            # this turn's content with itself.
+            input_messages = [
+                Message(
+                    role="user",
+                    content=[{"type": "input_text", "text": question}, *image_content],
+                )
+            ]
+            conversation_history = None
+        elif conversation_history:
             # Use the full conversation history
             input_messages = [
                 Message(role=msg["role"], content=msg["content"]) for msg in conversation_history
@@ -554,12 +634,23 @@ class ToolCallingAgent(ResponsesAgent):
             active_span = mlflow.get_current_active_span()
             trace_id = active_span.trace_id if active_span else None
 
-            # Set clean request preview for MLflow UI
-            mlflow.update_current_trace(request_preview=question)
+            # Set clean request preview + user metadata for MLflow UI.
+            # Session metadata only when the caller tracks a multi-turn
+            # session — single-turn traces must not appear in Sessions view.
+            metadata = {}
+            if session_id:
+                metadata["mlflow.trace.session"] = session_id
+            if user_id:
+                metadata["mlflow.trace.user"] = user_id
+            mlflow.update_current_trace(request_preview=question, metadata=metadata or None)
 
             full_response = ''
 
-            for event in self.predict_stream(request):
+            for event in self.predict_stream(
+                request,
+                conversation_history=conversation_history,
+                model_serving_client=model_serving_client,
+            ):
                 if event.type == "response.output_item.done":
                     item = event.item
                     item_type = item.get("type") if isinstance(item, dict) else getattr(item, "type", None)

@@ -36,10 +36,63 @@ from .telco_tools import TELCO_TOOLS
 
 logger = logging.getLogger(__name__)
 
+
+class _ReasoningFreeStream:
+  """Proxy over a chat-completions stream that flattens list-valued delta content.
+
+  After a tool result, databricks-claude-sonnet-5-5 streams its thinking signature
+  as `delta.content = [{'type': 'reasoning', ...}]`. The Agents SDK chat-completions
+  handler assumes `delta.content` is a string and raises a pydantic ValidationError.
+  Keep any text blocks, drop reasoning blocks; everything else delegates to the
+  wrapped stream so close/aclose and response headers still work.
+  """
+
+  def __init__(self, stream: Any):
+    self._stream = stream
+
+  def __getattr__(self, name: str) -> Any:
+    return getattr(self._stream, name)
+
+  def __aiter__(self):
+    return self._iterate()
+
+  async def _iterate(self):
+    async for chunk in self._stream:
+      for choice in chunk.choices or []:
+        content = choice.delta.content
+        if isinstance(content, list):
+          text = ''.join(
+            block.get('text') or ''
+            for block in content
+            if isinstance(block, dict) and block.get('type') == 'text'
+          )
+          choice.delta.content = text or None
+      yield chunk
+
+
+class _TelcoDatabricksOpenAI(AsyncDatabricksOpenAI):
+  """AsyncDatabricksOpenAI whose streamed chat completions go through _ReasoningFreeStream."""
+
+  @property
+  def chat(self):
+    """Return the Databricks chat resource with a reasoning-safe completions.create."""
+    # Wrap the instance method rather than subclassing the completions class so the
+    # MLflow autolog span keeps its AsyncDatabricksCompletions name.
+    chat = super().chat
+    create = chat.completions.create
+
+    async def _create(*args, **kwargs):
+      result = await create(*args, **kwargs)
+      return _ReasoningFreeStream(result) if kwargs.get('stream') else result
+
+    chat.completions.create = _create
+    return chat
+
+
 # Initialize at module import time so the OpenAI client used by Agents SDK is
 # the one mlflow.openai.autolog has patched. Doing this lazily caused traces
 # to skip telco runs entirely.
-set_default_openai_client(AsyncDatabricksOpenAI())
+set_default_openai_client(_TelcoDatabricksOpenAI())
 set_default_openai_api('chat_completions')
 set_trace_processors([])  # let MLflow be the only trace processor
 mlflow.openai.autolog()

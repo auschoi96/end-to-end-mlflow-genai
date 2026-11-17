@@ -1,7 +1,7 @@
 """In-process telco support orchestrator using the OpenAI Agents SDK.
 
 Replaces the previous httpx -> Databricks model-serving endpoint round-trip
-with a Databricks-hosted LLM (default: claude-sonnet-4-5) calling the 8 UC
+with a Databricks-hosted LLM (default: claude-sonnet-5-5) calling the 8 UC
 functions copied to main.austin_choi_demo as tools. This follows the
 Databricks multi-agent-apps pattern: one Agent runs in the FastAPI process,
 MLflow autolog traces every step.
@@ -119,7 +119,7 @@ async def stream_telco_response(
   a @mlflow.trace decorated sync function, then yield the collected events
   to the SSE consumer.
   """
-  selected_model = model or os.getenv('TELCO_MODEL', 'databricks-claude-sonnet-4-5')
+  selected_model = model or os.getenv('TELCO_MODEL', 'databricks-claude-sonnet-5-5')
 
   yield {
     'type': 'routing',

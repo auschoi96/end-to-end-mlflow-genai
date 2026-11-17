@@ -30,7 +30,7 @@ env:
   - name: 'METRICS_RESULT_URL'
     value: 'placeholder-metrics-url'
   - name: 'LLM_MODEL'
-    value: 'databricks-claude-sonnet-4-6'
+    value: 'databricks-claude-sonnet-5-5'
   # UC_CATALOG/UC_SCHEMA scope NFL agent prompts and UC tools. NFL data
   # (football_pbp_data, 7 UC functions, dc_assistant_system_prompt) lives
   # in users.austin_choi in this workspace. Telco UC functions live in
@@ -99,7 +99,7 @@ env:
   # The agent now runs in-process via the OpenAI Agents SDK. It calls UC
   # functions in main.austin_choi_demo, no separate serving endpoint needed.
   - name: 'TELCO_MODEL'
-    value: 'databricks-claude-sonnet-4-5'
+    value: 'databricks-claude-sonnet-5-5'
   - name: 'TELCO_FUNCTION_PREFIX'
     value: 'main.austin_choi_demo'
   - name: 'TELCO_MLFLOW_EXPERIMENT_ID'

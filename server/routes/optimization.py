@@ -65,7 +65,7 @@ async def run_optimization(request: RunOptimizationRequest):
         else f'{uc_catalog}.{uc_schema}.{prompt_short_name}'
       )
       prompt_alias = os.environ.get('PROMPT_ALIAS', 'production')
-      reflection_model = os.environ.get('REFLECTION_MODEL', 'databricks:/databricks-claude-sonnet-4-6')
+      reflection_model = os.environ.get('REFLECTION_MODEL', 'databricks:/databricks-claude-sonnet-5-5')
 
       yield f'data: {json.dumps({"type": "start", "message": "Starting lightweight GEPA optimization..."})}\n\n'
 
